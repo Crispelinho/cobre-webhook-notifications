@@ -23,9 +23,11 @@ IDs are `varchar(64)` so seeded IDs (`EVT001`) and UUIDv7 strings share the same
 
 `client_id` is denormalized into `notifications` so every self-service query filters on one indexed column without joins.
 
-### Persistence entities separate from the domain
+### Read side with explicit SQL
 
-JPA entities live in `adapters.out.persistence` and are mapped to domain objects. The domain stays framework-free. This costs some mapping code, but it keeps the dispatcher and replay logic testable without a database.
+The query adapter (`JdbcNotificationQueryAdapter`) uses `JdbcClient` with explicit SQL instead of JPA entities. The list joins `notifications` and `events` and builds its `WHERE` clause only from the filters present, always including `client_id`. Rows are mapped straight to domain objects.
+
+This replaces the original plan of JPA entities for reads, for three reasons: a join with optional filters is clearer in SQL than in a JPA specification; there is no N+1 risk; and no entity for the `events` table has to live inside the `notifications` capability. JPA remains an option for the write side (ingestion, replay with optimistic locking) in later changes. The domain stays framework-free either way.
 
 ### Query port
 

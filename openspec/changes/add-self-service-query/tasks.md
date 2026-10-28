@@ -2,25 +2,26 @@
 
 ## 1. Schema
 
-- [ ] 1.1 Add `V1__create_notification_schema.sql` with tables, constraints and indexes from `design.md`
-- [ ] 1.2 Integration test: Flyway migrates an empty PostgreSQL (Testcontainers) and Hibernate validation passes
+- [x] 1.1 Add `V1__create_notification_schema.sql` with tables, constraints and indexes from `design.md`
+- [x] 1.2 Integration test: Flyway migrates an empty PostgreSQL (Testcontainers) and constraints hold
 
 ## 2. Domain
 
-- [ ] 2.1 Add `NotificationEvent`, `DeliveryAttempt`, `DeliveryStatus`, `ClientId` and `NotificationEventId`
-- [ ] 2.2 Add `NotificationFilter` with its validation rules (date range order) and unit tests
+- [x] 2.1 Add `NotificationEvent`, `DeliveryAttempt`, `DeliveryStatus`, `ClientId` and `NotificationEventId`
+- [x] 2.2 Add `NotificationFilter` with its validation rules (date range order) and unit tests
 
 ## 3. Application
 
-- [ ] 3.1 Add input ports `ListNotificationEvents` and `GetNotificationEvent`, and their use cases
-- [ ] 3.2 Add output port `NotificationQueryPort` with `ClientId` required on every method
-- [ ] 3.3 Unit tests for the use cases with a fake port
+- [x] 3.1 Add input ports `ListNotificationEvents` and `GetNotificationEvent`, and their use cases
+- [x] 3.2 Add output port `NotificationQueryPort` with `ClientId` required on every method
+- [x] 3.3 Unit tests for the use cases with a fake port
+- [x] 3.4 Architecture test: domain and application import no framework or adapter code
 
 ## 4. Persistence adapter
 
-- [ ] 4.1 Add JPA entities, repositories and mappers
-- [ ] 4.2 Implement `NotificationQueryPort` with filters, sorting and pagination
-- [ ] 4.3 Integration tests against PostgreSQL (Testcontainers) for each filter and for client scoping
+- [x] 4.1 Implement `NotificationQueryPort` with `JdbcClient` and explicit SQL (see `design.md`)
+- [x] 4.2 Filters, sorting and pagination
+- [x] 4.3 Integration tests against PostgreSQL (Testcontainers) for each filter and for client scoping
 
 ## 5. Security
 
