@@ -51,6 +51,9 @@ dependencies {
 		implementation("at.yawk.lz4:lz4-java:1.11.4") {
 			because("GHSA-mcr4-qmvw-px4g (high): versions <= 1.11.3 are vulnerable; pulled transitively by kafka-clients")
 		}
+		implementation("org.xerial.snappy:snappy-java:1.1.10.12") {
+			because("GHSA-q233-g92q-qxp6 and GHSA-gwq9-9ffj-mvrv (high): versions <= 1.1.10.8 are vulnerable; pulled transitively by kafka-clients")
+		}
 	}
 }
 
