@@ -25,9 +25,9 @@
 
 ## 5. Security
 
-- [ ] 5.1 Configure the resource server: RS256 public key, issuer, audience and `client_id` validators
-- [ ] 5.2 Map `notifications:read` to the GET endpoints
-- [ ] 5.3 Return problem details for `401` and `403`
+- [x] 5.1 Configure the resource server: RS256 public key, issuer, audience and `client_id` validators
+- [x] 5.2 Map `notifications:read` to the GET endpoints
+- [x] 5.3 Return problem details for `401` and `403` (verified over HTTP in 8.2)
 
 ## 6. REST adapter
 

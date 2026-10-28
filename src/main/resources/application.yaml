@@ -15,6 +15,14 @@ spring:
       group-id: notification-service
       auto-offset-reset: earliest
 
+app:
+  security:
+    jwt:
+      # Public key of the token issuer. Locally it is created by the dev-token tool.
+      public-key-location: ${JWT_PUBLIC_KEY_LOCATION:file:.local/dev-jwt/public.pem}
+      issuer: ${JWT_ISSUER:cobre-notifications-dev}
+      audience: notification-service
+
 management:
   endpoints:
     web:
