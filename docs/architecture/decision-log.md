@@ -78,3 +78,4 @@ All decisions taken during refinement and design (2026-10-28). Each one was appr
 | D45 | Parallel work in separate sessions and Git worktrees: implementation critical path (changes 1 → 2 → 3) in the main session; documentation and presentation in a parallel session; subscription management (change 4) in parallel once change 1 is merged. At most three fronts at once. | One session for everything. | Human review is the bottleneck, not the AI. | AI |
 | D46 | Flyway migration numbers reserved per change: V1 query schema, V2 ingestion and outbox, V3 subscription management, V4 replay, V5 observability and audit. | First come, first served. | Parallel branches do not collide. | AI |
 | D47 | The `add-self-service-query` specs are approved for implementation. | — | SDD human gate. | Human |
+| D48 | The panel deliverable is a slide deck. | Written document. | The statement allows either format; developer's choice. | Human |
