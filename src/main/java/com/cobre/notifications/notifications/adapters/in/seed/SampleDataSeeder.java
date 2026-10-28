@@ -93,7 +93,7 @@ public class SampleDataSeeder {
 		jdbc.sql("""
 				INSERT INTO notifications (id, event_id, subscription_id, client_id, destination_url, delivery_status,
 				                           created_at, delivery_date, delivered_at)
-				VALUES (:id, :id, :subscriptionId, :clientId, :url, :status, :createdAt, :createdAt, :deliveredAt)
+				VALUES (:id, :id, :subscriptionId, :clientId, :url, :status, :createdAt, :deliveryDate, :deliveredAt)
 				ON CONFLICT (id) DO NOTHING
 				""")
 			.param("id", event.eventId())
@@ -102,6 +102,8 @@ public class SampleDataSeeder {
 			.param("url", "https://webhook.example.com/" + event.clientId())
 			.param("status", event.deliveryStatus())
 			.param("createdAt", createdAt)
+			// delivery_date is the final outcome, so it exists only for completed or failed records.
+			.param("deliveryDate", isFinal(event.deliveryStatus()) ? createdAt : null, Types.TIMESTAMP_WITH_TIMEZONE)
 			.param("deliveredAt", "completed".equals(event.deliveryStatus()) ? createdAt : null,
 					Types.TIMESTAMP_WITH_TIMEZONE)
 			.update();
@@ -114,6 +116,10 @@ public class SampleDataSeeder {
 		catch (IOException ex) {
 			throw new UncheckedIOException("Cannot read " + SAMPLE, ex);
 		}
+	}
+
+	private static boolean isFinal(String deliveryStatus) {
+		return "completed".equals(deliveryStatus) || "failed".equals(deliveryStatus);
 	}
 
 	private static String subscriptionId(String clientId) {

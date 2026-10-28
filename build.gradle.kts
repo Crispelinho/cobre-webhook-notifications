@@ -53,6 +53,8 @@ dependencies {
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 	// Same version that spring-security-oauth2-jose brings to the application.
 	"devToolsImplementation"("com.nimbusds:nimbus-jose-jwt:10.9.1")
+	// Lets a test prove that the application accepts dev tokens.
+	testImplementation(devTools.output)
 
 	constraints {
 		implementation("at.yawk.lz4:lz4-java:1.11.4") {

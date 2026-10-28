@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -88,12 +89,15 @@ class SelfServiceApiAcceptanceTests {
 		}
 
 		@ParameterizedTest
-		@ValueSource(strings = { "delivery_status=delivered", "created_from=yesterday",
-				"created_from=2024-03-15T16:00:00Z&created_to=2024-03-15T10:00:00Z", "page=abc" })
+		@ValueSource(strings = { "delivery_status=delivered", "delivery_status=COMPLETED", "created_from=yesterday",
+				"created_to=2024-03-15", "created_from=2024-03-15T16:00:00Z&created_to=2024-03-15T10:00:00Z",
+				"page=abc", "page=-1", "size=0" })
 		void invalidFilterValues(String query) throws Exception {
 			mvc.perform(as("CLIENT001", get("/notification_events?" + query)))
 				.andExpect(status().isBadRequest())
-				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.detail").isNotEmpty());
 		}
 
 	}
@@ -122,13 +126,34 @@ class SelfServiceApiAcceptanceTests {
 	@Nested
 	class GetNotificationEventDetail {
 
+		@Autowired
+		private JdbcClient jdbc;
+
+		@BeforeEach
+		void recordAttemptsOutOfOrder() {
+			jdbc.sql("""
+					INSERT INTO delivery_attempts
+					    (notification_id, round, attempt_number, attempted_at, http_status, error_type, latency_ms)
+					VALUES ('EVT003', 2, 1, '2024-03-16T08:00:00Z', 500, 'server_error', 80),
+					       ('EVT003', 1, 2, '2024-03-15T11:20:18Z', 503, 'server_error', 120),
+					       ('EVT003', 1, 1, '2024-03-15T11:20:08Z', NULL, 'timeout', 5000)
+					ON CONFLICT DO NOTHING
+					""").update();
+		}
+
 		@Test
 		void clientReadsItsOwnNotificationEvent() throws Exception {
 			mvc.perform(as("CLIENT002", get("/notification_events/EVT003")))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.notification_event_id").value("EVT003"))
 				.andExpect(jsonPath("$.delivery_status").value("failed"))
-				.andExpect(jsonPath("$.attempts").isArray());
+				.andExpect(jsonPath("$.attempts[*].round").value(contains(1, 1, 2)))
+				.andExpect(jsonPath("$.attempts[*].attempt_number").value(contains(1, 2, 1)))
+				.andExpect(jsonPath("$.attempts[0].attempted_at").value("2024-03-15T11:20:08Z"))
+				.andExpect(jsonPath("$.attempts[0].http_status").value(nullValue()))
+				.andExpect(jsonPath("$.attempts[0].error_type").value("timeout"))
+				.andExpect(jsonPath("$.attempts[0].latency_ms").value(5000))
+				.andExpect(jsonPath("$.attempts[1].http_status").value(503));
 		}
 
 		@Test

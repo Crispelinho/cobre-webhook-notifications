@@ -5,6 +5,8 @@ import java.io.InputStream;
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
 
+import jakarta.servlet.DispatcherType;
+
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -42,8 +44,12 @@ public class SecurityConfig {
 				.hasAuthority("SCOPE_notifications:read")
 				.requestMatchers("/actuator/health", "/actuator/info")
 				.permitAll()
+				// Error dispatches must keep their original status instead of becoming 403.
+				.dispatcherTypeMatchers(DispatcherType.ERROR)
+				.permitAll()
+				// New endpoints are forbidden until they declare the scope they need.
 				.anyRequest()
-				.authenticated())
+				.denyAll())
 			.oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults())
 				.authenticationEntryPoint(new ProblemDetailsAuthenticationEntryPoint())
 				.accessDeniedHandler(new ProblemDetailsAccessDeniedHandler()))

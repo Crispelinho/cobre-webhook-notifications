@@ -1,7 +1,10 @@
 package com.cobre.notifications;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -60,7 +63,15 @@ class PlatformSecurityAcceptanceTests {
 	@Test
 	void missingReadScope() throws Exception {
 		call(ISSUER.token("CLIENT001", "notifications:replay")).andExpect(status().isForbidden())
+			.andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"insufficient_scope\""))
 			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+	}
+
+	@Test
+	void endpointsWithoutAnExplicitRuleAreForbidden() throws Exception {
+		mvc.perform(post("/notification_events").header(HttpHeaders.AUTHORIZATION,
+				"Bearer " + ISSUER.token("CLIENT001", "notifications:read")))
+			.andExpect(status().isForbidden());
 	}
 
 	@Test
@@ -87,10 +98,15 @@ class PlatformSecurityAcceptanceTests {
 		return mvc.perform(get("/notification_events").header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
 	}
 
+	/**
+	 * The header and body must not reveal why the token was rejected (expiry, missing claim, wrong key).
+	 */
 	private static void expectUnauthorized(ResultActions result) throws Exception {
 		result.andExpect(status().isUnauthorized())
-			.andExpect(header().exists(HttpHeaders.WWW_AUTHENTICATE))
-			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+			.andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"))
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(content().string(not(containsString("expired"))))
+			.andExpect(content().string(not(containsString("client_id"))));
 	}
 
 }

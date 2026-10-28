@@ -5,22 +5,21 @@ import java.io.IOException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.web.AuthenticationEntryPoint;
 
 /**
- * Answers 401 with the standard {@code WWW-Authenticate} header and an RFC 9457 body. The body never includes the
- * validation failure, so callers learn nothing about why a token was rejected.
+ * Answers 401 with an RFC 9457 body. Unlike Spring's {@code BearerTokenAuthenticationEntryPoint}, the
+ * {@code WWW-Authenticate} header carries no {@code error_description}, so callers learn nothing about why a token was
+ * rejected (for example, that it expired or lacks a claim).
  */
 class ProblemDetailsAuthenticationEntryPoint implements AuthenticationEntryPoint {
-
-	private final BearerTokenAuthenticationEntryPoint bearer = new BearerTokenAuthenticationEntryPoint();
 
 	@Override
 	public void commence(HttpServletRequest request, HttpServletResponse response,
 			AuthenticationException authException) throws IOException {
-		bearer.commence(request, response, authException);
+		response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
 		ProblemResponses.write(response, 401, "Unauthorized", "A valid access token is required.");
 	}
 

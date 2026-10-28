@@ -38,7 +38,14 @@
 ## 7. Seed and tooling
 
 - [x] 7.1 Add `SampleDataSeeder` (idempotent) and the `local` profile
-- [x] 7.2 Add the `tools/dev-token` source set and the `devToken` Gradle task (verified manually against the running application)
+- [x] 7.2 Add the `tools/dev-token` source set and the `devToken` Gradle task (`DevTokenToolTests`, plus a manual run against the application)
+
+## 9. Review findings
+
+- [x] 9.1 `WWW-Authenticate` no longer carries `error_description` (it revealed why a token was rejected)
+- [x] 9.2 No default JWT issuer or key outside the `local` profile (fail-closed configuration)
+- [x] 9.3 Endpoints without an explicit authorization rule are denied
+- [x] 9.4 Stronger tests: attempt fields and ordering over HTTP, parameter boundaries, problem bodies
 
 ## 8. Acceptance
 

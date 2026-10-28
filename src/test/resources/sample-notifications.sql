@@ -29,7 +29,8 @@ INSERT INTO notifications (id, event_id, subscription_id, client_id, destination
     ('EVT009', 'EVT009', 'SUB-CLIENT003', 'CLIENT003', 'https://webhook.example.com/CLIENT003', 'failed',    '2024-03-15T17:25:30Z', '2024-03-15T17:25:30Z', NULL),
     ('EVT010', 'EVT010', 'SUB-CLIENT001', 'CLIENT001', 'https://webhook.example.com/CLIENT001', 'completed', '2024-03-15T18:05:12Z', '2024-03-15T18:05:12Z', '2024-03-15T18:05:12Z');
 
--- Two attempts for EVT003 to exercise the detail view ordering.
+-- Attempts for EVT003, inserted out of order to exercise ordering by round, then attempt number.
 INSERT INTO delivery_attempts (notification_id, round, attempt_number, attempted_at, http_status, error_type, latency_ms) VALUES
+    ('EVT003', 2, 1, '2024-03-16T08:00:00Z', 500, 'server_error', 80),
     ('EVT003', 1, 2, '2024-03-15T11:20:18Z', 503, 'server_error', 120),
     ('EVT003', 1, 1, '2024-03-15T11:20:08Z', NULL, 'timeout', 5000);

@@ -98,7 +98,8 @@ class JdbcNotificationQueryAdapterTests {
 		assertThat(detail.eventType()).isEqualTo("credit_transfer");
 		assertThat(detail.deliveryStatus()).isEqualTo(DeliveryStatus.FAILED);
 		assertThat(detail.deliveredAt()).isNull();
-		assertThat(detail.attempts()).extracting(a -> a.attemptNumber()).containsExactly(1, 2);
+		assertThat(detail.attempts()).extracting(a -> a.round() + "." + a.attemptNumber())
+			.containsExactly("1.1", "1.2", "2.1");
 		assertThat(detail.attempts().getFirst().httpStatus()).isNull();
 	}
 
