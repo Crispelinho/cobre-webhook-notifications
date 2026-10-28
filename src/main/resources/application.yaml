@@ -29,6 +29,11 @@ app:
   seed:
     # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
     enabled: false
+  webhook:
+    # Comma-separated hosts that webhooks may be sent to; an entry starting with "." also allows its subdomains.
+    allowed-hosts: ${WEBHOOK_ALLOWED_HOSTS:}
+    # Base64-encoded 256-bit AES key that encrypts webhook secrets at rest. Required, no default.
+    secrets-key: ${WEBHOOK_SECRETS_KEY}
 
 management:
   endpoints:

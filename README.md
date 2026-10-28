@@ -68,6 +68,15 @@ docker compose up -d
 
 The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` is expected to start these services automatically. Running the application end to end is verified in the first implemented change.
 
+### Webhook configuration
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `WEBHOOK_SECRETS_KEY` | Yes, outside the `local` profile | Base64-encoded 256-bit AES key that encrypts webhook signing secrets at rest. The application does not start without it. Generate one with `openssl rand -base64 32`. |
+| `WEBHOOK_ALLOWED_HOSTS` | No (empty rejects every URL) | Comma-separated hosts that subscriptions may point to. An entry starting with `.` (for example `.example.org`) also allows that domain's subdomains. Only `https` on port 443 is accepted, and every resolved address must be public. |
+
+The `local` profile ships a development-only key; never reuse it elsewhere.
+
 ## How we work
 
 The project follows a hybrid **ODD + SDD** approach (objective-driven, then specification-driven) with [OpenSpec](https://github.com/Fission-AI/OpenSpec).

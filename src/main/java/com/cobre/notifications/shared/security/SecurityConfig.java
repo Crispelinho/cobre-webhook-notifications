@@ -42,6 +42,14 @@ public class SecurityConfig {
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers(HttpMethod.GET, "/notification_events", "/notification_events/*")
 				.hasAuthority("SCOPE_notifications:read")
+				.requestMatchers(HttpMethod.GET, "/subscriptions", "/subscriptions/*")
+				.hasAuthority("SCOPE_subscriptions:read")
+				.requestMatchers(HttpMethod.POST, "/subscriptions")
+				.hasAuthority("SCOPE_subscriptions:write")
+				.requestMatchers(HttpMethod.PATCH, "/subscriptions/*")
+				.hasAuthority("SCOPE_subscriptions:write")
+				.requestMatchers(HttpMethod.DELETE, "/subscriptions/*")
+				.hasAuthority("SCOPE_subscriptions:write")
 				.requestMatchers("/actuator/health", "/actuator/info")
 				.permitAll()
 				// Error dispatches must keep their original status instead of becoming 403.
