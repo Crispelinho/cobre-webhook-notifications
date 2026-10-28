@@ -1,0 +1,8 @@
+app:
+  security:
+    jwt:
+      # Created by ./gradlew devToken; must match DevTokenTool.ISSUER.
+      public-key-location: file:.local/dev-jwt/public.pem
+      issuer: cobre-notifications-dev
+  seed:
+    enabled: true

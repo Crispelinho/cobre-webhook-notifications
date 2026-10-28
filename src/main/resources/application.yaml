@@ -4,6 +4,9 @@ spring:
   threads:
     virtual:
       enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
   jpa:
     open-in-view: false
     hibernate:
@@ -14,6 +17,18 @@ spring:
     consumer:
       group-id: notification-service
       auto-offset-reset: earliest
+
+app:
+  security:
+    jwt:
+      # Required, no defaults: the application must not start trusting a development issuer by accident.
+      # The local profile points both values at the dev-token tool.
+      public-key-location: ${JWT_PUBLIC_KEY_LOCATION}
+      issuer: ${JWT_ISSUER}
+      audience: notification-service
+  seed:
+    # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
+    enabled: false
 
 management:
   endpoints:

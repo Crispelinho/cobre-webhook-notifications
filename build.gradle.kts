@@ -18,6 +18,11 @@ repositories {
 	mavenCentral()
 }
 
+// Development-only tools, kept out of the application artifact.
+val devTools by sourceSets.creating {
+	java.srcDir("tools/dev-token/src/main/java")
+}
+
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
 	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
@@ -46,6 +51,10 @@ dependencies {
 	testImplementation("org.testcontainers:testcontainers-kafka")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+	// Same version that spring-security-oauth2-jose brings to the application.
+	"devToolsImplementation"("com.nimbusds:nimbus-jose-jwt:10.9.1")
+	// Lets a test prove that the application accepts dev tokens.
+	testImplementation(devTools.output)
 
 	constraints {
 		implementation("at.yawk.lz4:lz4-java:1.11.4") {
@@ -59,4 +68,12 @@ dependencies {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+}
+
+tasks.register<JavaExec>("devToken") {
+	group = "application"
+	description = "Prints a development-only JWT. Usage: ./gradlew devToken --args=\"CLIENT001 notifications:read\""
+	classpath = devTools.runtimeClasspath
+	mainClass = "com.cobre.notifications.devtools.DevTokenTool"
+	workingDir = rootDir
 }
