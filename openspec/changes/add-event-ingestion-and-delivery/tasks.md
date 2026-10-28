@@ -14,11 +14,11 @@
 
 ## 3. Delivery and retries
 
-- [ ] 3.1 `DeliveryOutcome` classification and state transitions in the domain, with unit tests
-- [ ] 3.2 HTTPS `WebhookSender` adapter (timeouts, no redirects) and attempt recording
-- [ ] 3.3 Dispatch consumer with `@RetryableTopic`, per-profile backoff and dead-letter handler
-- [ ] 3.4 Idempotent consumption (completed or older round is ignored)
-- [ ] 3.5 Integration tests with WireMock over HTTPS for every delivery and retry scenario
+- [x] 3.1 `DeliveryOutcome` classification and state transitions in the domain, with unit tests
+- [x] 3.2 HTTPS `WebhookSender` adapter (timeouts, no redirects) and attempt recording
+- [x] 3.3 Dispatch consumer with `@RetryableTopic`, per-profile backoff and dead-letter handler
+- [x] 3.4 Idempotent consumption (completed or older round is ignored)
+- [x] 3.5 Integration tests with WireMock over HTTPS for every delivery and retry scenario
 
 ## 4. After `add-subscription-management` is merged
 

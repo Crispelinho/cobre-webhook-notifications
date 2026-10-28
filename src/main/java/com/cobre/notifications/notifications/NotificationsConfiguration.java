@@ -1,15 +1,20 @@
 package com.cobre.notifications.notifications;
 
+import java.time.Clock;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
+import com.cobre.notifications.notifications.application.DeliveryService;
 import com.cobre.notifications.notifications.application.NotificationQueryService;
 import com.cobre.notifications.notifications.application.RelayOutbox;
+import com.cobre.notifications.notifications.application.port.out.DeliveryStore;
 import com.cobre.notifications.notifications.application.port.out.DispatchPublisher;
 import com.cobre.notifications.notifications.application.port.out.NotificationQueryPort;
 import com.cobre.notifications.notifications.application.port.out.OutboxPort;
+import com.cobre.notifications.notifications.application.port.out.WebhookSender;
 
 /**
  * Composition root of the notifications capability: wires framework-free use cases to their adapters.
@@ -27,6 +32,12 @@ class NotificationsConfiguration {
 	RelayOutbox relayOutbox(OutboxPort outbox, DispatchPublisher publisher,
 			@Value("${app.outbox.relay.batch-size:100}") int batchSize) {
 		return new RelayOutbox(outbox, publisher, batchSize);
+	}
+
+	@Bean
+	DeliveryService deliveryService(DeliveryStore store, WebhookSender sender,
+			@Value("${app.delivery.retry.max-attempts:5}") int maxAttempts) {
+		return new DeliveryService(store, sender, Clock.systemUTC(), maxAttempts);
 	}
 
 }

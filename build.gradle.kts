@@ -50,6 +50,8 @@ dependencies {
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	testImplementation("org.testcontainers:testcontainers-kafka")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
+	// Shaded Jetty: no clash with the Tomcat of the application under test.
+	testImplementation("org.wiremock:wiremock-standalone:3.13.2")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 	// Same version that spring-security-oauth2-jose brings to the application.
 	"devToolsImplementation"("com.nimbusds:nimbus-jose-jwt:10.9.1")

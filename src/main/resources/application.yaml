@@ -43,6 +43,22 @@ app:
       poll-interval: PT0.5S
       batch-size: 100
       publish-timeout: PT5S
+  delivery:
+    # Set to false to run the application without the dispatch consumer (no webhooks are sent).
+    consumer:
+      enabled: true
+    http:
+      connect-timeout: PT2S
+      request-timeout: PT10S
+    retry:
+      # Attempts per round, the first one included.
+      max-attempts: 5
+      # Default profile: exponential backoff, 30 s up to 1 h, with jitter. Overridden by `delays` when it is set
+      # (the demo profile does).
+      initial-delay: PT30S
+      multiplier: 4
+      max-delay: PT1H
+      jitter: PT5S
   seed:
     # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
     enabled: false
