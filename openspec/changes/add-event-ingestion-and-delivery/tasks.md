@@ -2,10 +2,10 @@
 
 ## 1. Ingestion
 
-- [ ] 1.1 `V2__create_outbox.sql`
-- [ ] 1.2 `events` capability: `Event`, `SubscriptionMatcher`, `IngestEventUseCase` with unit tests
-- [ ] 1.3 `POST /events` with validation, `409` on duplicates and the `events:write` rule
-- [ ] 1.4 Acceptance tests for ingestion, duplicate, validation and producer authorization scenarios
+- [x] 1.1 `V2__create_outbox.sql`
+- [x] 1.2 `events` capability: `Event`, `SubscriptionMatcher`, `IngestEventUseCase` with unit tests
+- [x] 1.3 `POST /events` with validation, `409` on duplicates and the `events:write` rule
+- [x] 1.4 Acceptance tests for ingestion, duplicate, validation and producer authorization scenarios
 
 ## 2. Outbox and Kafka
 
