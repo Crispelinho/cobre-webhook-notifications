@@ -180,3 +180,41 @@ Under the [load assumptions](../requirements/objectives.md#load-assumptions):
 - Non-blocking retries isolate unhealthy receivers; strict timeouts protect worker capacity.
 - Target production platform: AWS (container service, managed Kafka such as MSK or Confluent Cloud, RDS).
 - Evolutions: per-destination circuit breaker, Debezium CDC for the outbox, keyset pagination, Redis-backed rate limiting, a Kafka consumer adapter for platform events, mTLS for internal producers.
+
+## Target AWS deployment
+
+> **Target design, not deployed.** The challenge runs locally with Docker Compose (D34). This diagram shows how the same containers would map to AWS; no cloud resources exist.
+
+```mermaid
+flowchart LR
+    producer["Cobre platform producers"]
+    client["Client systems"]
+    receiver["Client webhook receivers"]
+    idp["Identity provider<br/>(Keycloak or Cognito)"]
+
+    subgraph aws["AWS (target, not deployed)"]
+        alb["Load balancer<br/>HTTPS"]
+        subgraph ecs["Container service"]
+            api["api role<br/>(own deployment)"]
+            worker["worker role<br/>(own deployment)"]
+        end
+        rds[("RDS PostgreSQL<br/>source of truth + outbox<br/>encrypted with KMS")]
+        kafka[["Managed Kafka<br/>(MSK or Confluent Cloud)<br/>dispatch, retry topics, dead-letter topic"]]
+    end
+    grafana["Grafana Cloud or similar<br/>metrics, logs, traces, alerts"]
+
+    producer -- "POST /events (service JWT)" --> alb
+    client -- "Self-service API (client JWT)" --> alb
+    alb --> api
+    api --> rds
+    worker --> rds
+    worker <--> kafka
+    worker -- "HTTPS webhook, HMAC-signed" --> receiver
+    api -- OTLP --> grafana
+    worker -- OTLP --> grafana
+    idp -. "Issues JWTs" .-> producer
+    idp -. "Issues JWTs" .-> client
+    api -. "Validates JWTs (JWKS)" .-> idp
+```
+
+The `api` and `worker` roles run from the same image (D31) as separate deployments, so each can be scaled independently. Only the `worker` role makes outbound webhook calls, which keeps the SSRF-relevant egress in one place.
