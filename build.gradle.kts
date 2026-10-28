@@ -68,6 +68,10 @@ dependencies {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// Tests start no LGTM stack (see LgtmContainerConfiguration), so OTLP export has nowhere to go.
+	systemProperty("management.otlp.metrics.export.enabled", "false")
+	systemProperty("management.tracing.export.otlp.enabled", "false")
+	systemProperty("management.logging.export.otlp.enabled", "false")
 }
 
 tasks.register<JavaExec>("devToken") {
