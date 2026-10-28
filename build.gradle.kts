@@ -46,6 +46,12 @@ dependencies {
 	testImplementation("org.testcontainers:testcontainers-kafka")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+	constraints {
+		implementation("at.yawk.lz4:lz4-java:1.11.4") {
+			because("GHSA-mcr4-qmvw-px4g (high): versions <= 1.11.3 are vulnerable; pulled transitively by kafka-clients")
+		}
+	}
 }
 
 tasks.withType<Test> {
