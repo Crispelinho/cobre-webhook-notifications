@@ -7,9 +7,9 @@
 
 ## 2. Subscriptions capability
 
-- [ ] 2.1 Domain (`Subscription`, event type validation) and use cases: create, list, get, deactivate, patch
-- [ ] 2.2 Persistence adapter for the existing `subscriptions` table
-- [ ] 2.3 REST adapter with explicit request DTOs (unknown fields rejected) and the `subscriptions:*` rules
+- [x] 2.1 Domain (`Subscription`, event type validation) and use cases: create, list, get, deactivate, patch
+- [x] 2.2 Persistence adapter for the existing `subscriptions` table
+- [x] 2.3 REST adapter with explicit request DTOs (unknown fields rejected) and the `subscriptions:*` rules
 
 ## 3. Acceptance
 
