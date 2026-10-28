@@ -22,6 +22,9 @@ app:
       public-key-location: ${JWT_PUBLIC_KEY_LOCATION:file:.local/dev-jwt/public.pem}
       issuer: ${JWT_ISSUER:cobre-notifications-dev}
       audience: notification-service
+  seed:
+    # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
+    enabled: false
 
 management:
   endpoints:

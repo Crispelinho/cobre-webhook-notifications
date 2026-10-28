@@ -31,17 +31,17 @@
 
 ## 6. REST adapter
 
-- [ ] 6.1 Add `GET /notification_events` and `GET /notification_events/{notification_event_id}` with snake_case DTOs
-- [ ] 6.2 Validate query parameters and return `400` problem details
-- [ ] 6.3 Return `404` for unknown and foreign notification events with the same body
+- [x] 6.1 Add `GET /notification_events` and `GET /notification_events/{notification_event_id}` with snake_case DTOs
+- [x] 6.2 Validate query parameters and return `400` problem details
+- [x] 6.3 Return `404` for unknown and foreign notification events with the same body
 
 ## 7. Seed and tooling
 
-- [ ] 7.1 Add `SampleDataSeeder` (idempotent) and the `local` profile
-- [ ] 7.2 Add the `tools/dev-token` source set and the `devToken` Gradle task
+- [x] 7.1 Add `SampleDataSeeder` (idempotent) and the `local` profile
+- [x] 7.2 Add the `tools/dev-token` source set and the `devToken` Gradle task (verified manually against the running application)
 
 ## 8. Acceptance
 
-- [ ] 8.1 Acceptance tests for every scenario in `specs/self-service-api/spec.md`
-- [ ] 8.2 Acceptance tests for every scenario in `specs/platform-security/spec.md`
-- [ ] 8.3 `./gradlew build` passes
+- [x] 8.1 Acceptance tests for every scenario in `specs/self-service-api/spec.md`
+- [x] 8.2 Acceptance tests for every scenario in `specs/platform-security/spec.md`
+- [x] 8.3 `./gradlew build` passes
