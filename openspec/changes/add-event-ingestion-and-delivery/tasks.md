@@ -9,8 +9,8 @@
 
 ## 2. Outbox and Kafka
 
-- [ ] 2.1 Outbox relay with `SKIP LOCKED` and `DispatchPublisher` Kafka adapter
-- [ ] 2.2 Integration test: event accepted while Kafka is down is delivered later
+- [x] 2.1 Outbox relay with `SKIP LOCKED` and `DispatchPublisher` Kafka adapter
+- [x] 2.2 Integration test: event accepted while Kafka is down is delivered later
 
 ## 3. Delivery and retries
 

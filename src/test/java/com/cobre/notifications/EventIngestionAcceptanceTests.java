@@ -30,7 +30,7 @@ import org.springframework.test.web.servlet.ResultActions;
  * event ingestion, duplicate events, event validation and producer authorization. Each test uses its own client and
  * event ids, so tests do not depend on each other.
  */
-@SpringBootTest
+@SpringBootTest(properties = "app.outbox.relay.enabled=false")
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class EventIngestionAcceptanceTests {
