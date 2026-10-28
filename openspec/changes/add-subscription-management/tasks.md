@@ -13,7 +13,7 @@
 
 ## 3. Acceptance
 
-- [ ] 3.1 Tests for every scenario in both spec files
+- [x] 3.1 Tests for every scenario in both spec files
 - [ ] 3.2 `./gradlew build` passes; fresh-context AI review before the pull request
 
 ## Constraints for parallel work
