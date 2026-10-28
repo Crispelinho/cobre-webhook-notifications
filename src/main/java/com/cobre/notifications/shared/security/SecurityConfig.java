@@ -50,6 +50,9 @@ public class SecurityConfig {
 				.hasAuthority("SCOPE_subscriptions:write")
 				.requestMatchers(HttpMethod.DELETE, "/subscriptions/*")
 				.hasAuthority("SCOPE_subscriptions:write")
+				// Internal producers only: client tokens never carry this scope.
+				.requestMatchers(HttpMethod.POST, "/events")
+				.hasAuthority("SCOPE_events:write")
 				.requestMatchers("/actuator/health", "/actuator/info")
 				.permitAll()
 				// Error dispatches must keep their original status instead of becoming 403.

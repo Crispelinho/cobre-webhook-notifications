@@ -17,6 +17,14 @@ spring:
     consumer:
       group-id: notification-service
       auto-offset-reset: earliest
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        # Fail fast when the broker is unreachable; the relay keeps the row unpublished and polls again.
+        max.block.ms: 5000
+        delivery.timeout.ms: 15000
+        request.timeout.ms: 5000
 
 app:
   security:
@@ -26,6 +34,31 @@ app:
       public-key-location: ${JWT_PUBLIC_KEY_LOCATION}
       issuer: ${JWT_ISSUER}
       audience: notification-service
+  dispatch:
+    # Partitions of notification.dispatch (about 48 in production; small for local development).
+    partitions: 3
+  outbox:
+    relay:
+      enabled: true
+      poll-interval: PT0.5S
+      batch-size: 100
+      publish-timeout: PT5S
+  delivery:
+    # Set to false to run the application without the dispatch consumer (no webhooks are sent).
+    consumer:
+      enabled: true
+    http:
+      connect-timeout: PT2S
+      request-timeout: PT10S
+    retry:
+      # Attempts per round, the first one included.
+      max-attempts: 5
+      # Default profile: exponential backoff, 30 s up to 1 h, with jitter. Overridden by `delays` when it is set
+      # (the demo profile does).
+      initial-delay: PT30S
+      multiplier: 4
+      max-delay: PT1H
+      jitter: PT5S
   seed:
     # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
     enabled: false
