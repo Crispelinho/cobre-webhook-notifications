@@ -105,7 +105,11 @@ openspec validate --all --strict
 | [Problem statement](docs/challenge/problem_statement.md) | The challenge as provided by Cobre |
 | [Challenge plan](docs/challenge/CHALLENGE_PLAN.md) | Phases, governance and capabilities |
 | [Sample data](docs/challenge/notification_events.json) | Notification events used as seed data |
+| [Objectives and scope](docs/requirements/objectives.md) | ODD objectives, success criteria, load assumptions and MoSCoW scope |
+| [Requirements analysis](docs/requirements/analysis.md) | Sample data observations and how each ambiguity was resolved |
+| [System design](docs/architecture/system-design.md) | C4 diagrams, components, data model, flows, capacity and failure modes |
+| [Decision log](docs/architecture/decision-log.md) | Every design decision with alternatives, rationale and origin |
+| [Security analysis](docs/security/security-analysis.md) | Threat model, OWASP API Top 10 mitigations and supply-chain findings |
+| [Workflow](docs/process/workflow.md) | SDD lifecycle, branching, commits, CI and AI review |
 | [OpenSpec project context](openspec/project.md) | Conventions, domain vocabulary and assumptions |
 | [AI usage log](docs/ai-usage/README.md) | How AI was used and validated in each phase |
-| `docs/architecture/` | C4 diagrams and architecture decision records (planned) |
-| `docs/security/` | OWASP analysis and threat model (planned) |

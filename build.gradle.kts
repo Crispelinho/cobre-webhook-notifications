@@ -1,0 +1,62 @@
+plugins {
+	java
+	id("org.springframework.boot") version "4.1.2"
+	id("io.spring.dependency-management") version "1.1.7"
+}
+
+group = "com.cobre"
+version = "0.0.1-SNAPSHOT"
+description = "Webhook event notification delivery and self-service API"
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation("org.springframework.boot:spring-boot-starter-actuator")
+	implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+	implementation("org.springframework.boot:spring-boot-starter-flyway")
+	implementation("org.springframework.boot:spring-boot-starter-kafka")
+	implementation("org.springframework.boot:spring-boot-starter-opentelemetry")
+	implementation("org.springframework.boot:spring-boot-starter-security")
+	implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
+	implementation("org.springframework.boot:spring-boot-starter-validation")
+	implementation("org.springframework.boot:spring-boot-starter-webmvc")
+	implementation("org.flywaydb:flyway-database-postgresql")
+	developmentOnly("org.springframework.boot:spring-boot-docker-compose")
+	runtimeOnly("org.postgresql:postgresql")
+	testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
+	testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
+	testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
+	testImplementation("org.springframework.boot:spring-boot-starter-kafka-test")
+	testImplementation("org.springframework.boot:spring-boot-starter-opentelemetry-test")
+	testImplementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server-test")
+	testImplementation("org.springframework.boot:spring-boot-starter-security-test")
+	testImplementation("org.springframework.boot:spring-boot-starter-validation-test")
+	testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+	testImplementation("org.springframework.boot:spring-boot-testcontainers")
+	testImplementation("org.testcontainers:testcontainers-grafana")
+	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+	testImplementation("org.testcontainers:testcontainers-kafka")
+	testImplementation("org.testcontainers:testcontainers-postgresql")
+	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+	constraints {
+		implementation("at.yawk.lz4:lz4-java:1.11.4") {
+			because("GHSA-mcr4-qmvw-px4g (high): versions <= 1.11.3 are vulnerable; pulled transitively by kafka-clients")
+		}
+		implementation("org.xerial.snappy:snappy-java:1.1.10.12") {
+			because("GHSA-q233-g92q-qxp6 and GHSA-gwq9-9ffj-mvrv (high): versions <= 1.1.10.8 are vulnerable; pulled transitively by kafka-clients")
+		}
+	}
+}
+
+tasks.withType<Test> {
+	useJUnitPlatform()
+}
