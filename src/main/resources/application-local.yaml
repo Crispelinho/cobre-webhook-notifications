@@ -6,3 +6,6 @@ app:
       issuer: cobre-notifications-dev
   seed:
     enabled: true
+  webhook:
+    # Development-only key (the base64 of "local-only-key-not-for-real-use!"); never use it outside the local profile.
+    secrets-key: bG9jYWwtb25seS1rZXktbm90LWZvci1yZWFsLXVzZSE=

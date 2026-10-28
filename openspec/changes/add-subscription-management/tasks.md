@@ -2,8 +2,8 @@
 
 ## 1. Shared security components
 
-- [ ] 1.1 `shared.security.DestinationPolicy` with configurable allowlist and address-range checks, unit tests with a fake resolver
-- [ ] 1.2 `shared.crypto.SecretCipher` (AES-GCM, key from configuration) and `WebhookSigner` (HMAC-SHA256) with the test vector
+- [x] 1.1 `shared.security.DestinationPolicy` with configurable allowlist and address-range checks, unit tests with a fake resolver
+- [x] 1.2 `shared.crypto.SecretCipher` (AES-GCM, key from configuration) and `WebhookSigner` (HMAC-SHA256) with the test vector
 
 ## 2. Subscriptions capability
 

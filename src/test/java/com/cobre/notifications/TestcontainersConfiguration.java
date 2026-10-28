@@ -1,5 +1,8 @@
 package com.cobre.notifications;
 
+import java.security.SecureRandom;
+import java.util.Base64;
+
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -40,6 +43,17 @@ class TestcontainersConfiguration {
 			registry.add("app.security.jwt.issuer", () -> TestJwtIssuer.ISSUER);
 			registry.add("app.security.jwt.audience", () -> TestJwtIssuer.AUDIENCE);
 		};
+	}
+
+	/**
+	 * A fresh webhook secrets key per test run, so no key is ever committed for tests.
+	 */
+	@Bean
+	DynamicPropertyRegistrar webhookSecretsKey() {
+		byte[] bytes = new byte[32];
+		new SecureRandom().nextBytes(bytes);
+		String key = Base64.getEncoder().encodeToString(bytes);
+		return registry -> registry.add("app.webhook.secrets-key", () -> key);
 	}
 
 }
