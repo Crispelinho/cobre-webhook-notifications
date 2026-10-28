@@ -17,9 +17,11 @@ public interface SubscriptionRepository {
 	void insert(Subscription subscription, byte[] secretCiphertext);
 
 	/**
-	 * Sorted by creation date descending, then by id descending.
+	 * At most {@code limit} subscriptions, sorted by creation date descending, then by id descending.
 	 */
-	List<Subscription> findAll(ClientId clientId);
+	List<Subscription> findAll(ClientId clientId, int limit);
+
+	long countActive(ClientId clientId);
 
 	Optional<Subscription> findById(ClientId clientId, SubscriptionId id);
 

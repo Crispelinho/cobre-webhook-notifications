@@ -108,6 +108,50 @@ class DestinationPolicyTests {
 		assertThat(policy.check("HTTPS://Hooks.Example.ORG./cobre").host()).isEqualTo("hooks.example.org");
 	}
 
+	@ParameterizedTest
+	@ValueSource(strings = { "https://hooks.example.org:443/cobre", "https://hooks.example.org/cobre" })
+	void defaultHttpsPortIsAccepted(String url) {
+		assertThat(policy.check(url).host()).isEqualTo("hooks.example.org");
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "https://hooks.example.org:8443/", "https://hooks.example.org:6379/",
+			"https://hooks.example.org:22/" })
+	void otherPortsAreRejected(String url) {
+		expectRejected(url, "only port 443 is allowed");
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "11.0.0.1", "100.128.0.1", "172.15.255.255", "172.32.0.1", "169.253.255.255",
+			"192.167.255.255", "192.169.0.1", "198.20.0.1", "223.255.255.255", "2606:4700::1111", "2001:4860::8888",
+			"fbff::1" })
+	void publicAddressesNextToBlockedRangesAreAccepted(String address) {
+		DestinationPolicy policy = new DestinationPolicy(List.of("edge.example.org"),
+				new FakeResolver(Map.of("edge.example.org", address)));
+
+		assertThat(policy.check("https://edge.example.org/").addresses()).hasSize(1);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "3fff::1", "2001:db8::1", "100::1", "192.0.2.10", "198.51.100.10", "203.0.113.10" })
+	void documentationAndDiscardAddressesAreRejected(String address) {
+		DestinationPolicy policy = new DestinationPolicy(List.of("docs.example.org"),
+				new FakeResolver(Map.of("docs.example.org", address)));
+
+		expectRejected(policy, "https://docs.example.org/", "host resolves to a non-public address");
+	}
+
+	/**
+	 * Literal addresses are not in the allowlist, and user info cannot smuggle an allowlisted name in front of
+	 * another host.
+	 */
+	@ParameterizedTest
+	@ValueSource(strings = { "https://[::1]/", "https://127.0.0.1/", "https://2130706433/", "https://0x7f000001/",
+			"https://hooks.example.org:443@evil.example.net/" })
+	void ipLiteralsAndAuthorityTricksAreRejected(String url) {
+		assertThatExceptionOfType(RejectedDestinationException.class).isThrownBy(() -> policy.check(url));
+	}
+
 	@Test
 	void userInfoIsRejected() {
 		expectRejected("https://user:pass@hooks.example.org/", "user info is not allowed");

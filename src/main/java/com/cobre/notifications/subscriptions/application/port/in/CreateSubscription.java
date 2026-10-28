@@ -10,7 +10,7 @@ public interface CreateSubscription {
 	/**
 	 * Registers an active subscription owned by the given client.
 	 * @throws com.cobre.notifications.subscriptions.domain.InvalidSubscriptionException if the destination is not
-	 * allowed; nothing is stored
+	 * allowed or the client already has the maximum number of active subscriptions; nothing is stored
 	 */
 	CreatedSubscription create(ClientId clientId, WebhookUrl url, EventTypes eventTypes);
 

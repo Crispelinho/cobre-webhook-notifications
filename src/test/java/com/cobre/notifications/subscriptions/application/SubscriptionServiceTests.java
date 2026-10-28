@@ -41,7 +41,7 @@ class SubscriptionServiceTests {
 		if (url.equals(UNSAFE_URL)) {
 			throw new InvalidSubscriptionException("url is not an allowed destination");
 		}
-	}, () -> new IssuedSecret("whsec_plain", new byte[] { 9, 9, 9 }),
+	}, owner -> new IssuedSecret("whsec_plain", new byte[] { 9, 9, 9 }),
 			Clock.fixed(Instant.parse("2026-10-28T12:00:00Z"), ZoneOffset.UTC));
 
 	@Test
@@ -104,6 +104,44 @@ class SubscriptionServiceTests {
 	}
 
 	@Test
+	void activeSubscriptionsPerClientAreCapped() {
+		for (int i = 0; i < SubscriptionService.MAX_ACTIVE_PER_CLIENT; i++) {
+			service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT);
+		}
+
+		assertThatExceptionOfType(InvalidSubscriptionException.class)
+			.isThrownBy(() -> service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT))
+			.withMessageContaining("maximum");
+		assertThat(service.create(CLIENT_002, SAFE_URL, CREDIT_DEPOSIT).subscription().clientId()).isEqualTo(CLIENT_002);
+	}
+
+	@Test
+	void deactivatedSubscriptionsFreeCapacity() {
+		Subscription first = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
+		for (int i = 1; i < SubscriptionService.MAX_ACTIVE_PER_CLIENT; i++) {
+			service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT);
+		}
+
+		service.deactivate(CLIENT_001, first.id());
+
+		assertThat(service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription().active()).isTrue();
+	}
+
+	@Test
+	void secretIsIssuedForTheNewSubscription() {
+		List<SubscriptionId> owners = new ArrayList<>();
+		SubscriptionService service = new SubscriptionService(repository, url -> {
+		}, owner -> {
+			owners.add(owner);
+			return new IssuedSecret("whsec_plain", new byte[] { 1 });
+		}, Clock.systemUTC());
+
+		Subscription created = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
+
+		assertThat(owners).containsExactly(created.id());
+	}
+
+	@Test
 	void emptyChangesAreRejected() {
 		assertThatExceptionOfType(InvalidSubscriptionException.class)
 			.isThrownBy(() -> new SubscriptionChanges(null, null));
@@ -130,11 +168,16 @@ class SubscriptionServiceTests {
 		}
 
 		@Override
-		public List<Subscription> findAll(ClientId clientId) {
+		public List<Subscription> findAll(ClientId clientId, int limit) {
 			List<Subscription> result = new ArrayList<>(
 					subscriptions.values().stream().filter(s -> s.clientId().equals(clientId)).toList());
 			result.sort(Comparator.comparing(Subscription::createdAt).reversed());
-			return result;
+			return result.stream().limit(limit).toList();
+		}
+
+		@Override
+		public long countActive(ClientId clientId) {
+			return subscriptions.values().stream().filter(s -> s.clientId().equals(clientId) && s.active()).count();
 		}
 
 		@Override

@@ -53,12 +53,23 @@ class JdbcSubscriptionRepository implements SubscriptionRepository {
 
 	@Override
 	@Transactional(readOnly = true)
-	public List<Subscription> findAll(ClientId clientId) {
-		return jdbc
-			.sql("SELECT " + COLUMNS + " FROM subscriptions WHERE client_id = :clientId ORDER BY created_at DESC, id DESC")
+	public List<Subscription> findAll(ClientId clientId, int limit) {
+		return jdbc.sql("SELECT " + COLUMNS
+				+ " FROM subscriptions WHERE client_id = :clientId ORDER BY created_at DESC, id DESC LIMIT :limit")
 			.param("clientId", clientId.value())
+			.param("limit", limit)
 			.query((rs, rowNum) -> toSubscription(rs))
 			.list();
+	}
+
+	@Override
+	@Transactional(readOnly = true)
+	public long countActive(ClientId clientId) {
+		// Served by idx_subscriptions_client_active.
+		return jdbc.sql("SELECT count(*) FROM subscriptions WHERE client_id = :clientId AND active")
+			.param("clientId", clientId.value())
+			.query(Long.class)
+			.single();
 	}
 
 	@Override

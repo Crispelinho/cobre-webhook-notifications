@@ -100,7 +100,8 @@ class SubscriptionManagementAcceptanceTests {
 
 		@ParameterizedTest
 		@ValueSource(strings = { "http://hooks.example.org/cobre", "https://not-allowed.example.net/",
-				"https://loopback.example.org/", "https://private.example.org/", "https://metadata.example.org/latest" })
+				"https://loopback.example.org/", "https://private.example.org/", "https://metadata.example.org/latest",
+				"https://hooks.example.org:8443/cobre" })
 		void unsafeDestination(String url) throws Exception {
 			String clientId = "SUBTEST_UNSAFE";
 
@@ -343,7 +344,8 @@ class SubscriptionManagementAcceptanceTests {
 
 			assertThat(stored).isNotEqualTo(secret);
 			assertThat(new String(stored, StandardCharsets.ISO_8859_1)).doesNotContain(created.get("secret").asString());
-			assertThat(secretCipher.decrypt(stored)).isEqualTo(secret);
+			// The ciphertext is bound to its subscription id (associated data).
+			assertThat(secretCipher.decrypt(stored, created.get("subscription_id").asString())).isEqualTo(secret);
 		}
 
 	}

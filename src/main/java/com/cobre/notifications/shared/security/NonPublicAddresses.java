@@ -38,6 +38,7 @@ final class NonPublicAddresses {
 			Range.of("2001::/23"), // IETF protocol assignments, including Teredo
 			Range.of("2001:db8::/32"), // documentation
 			Range.of("2002::/16"), // 6to4
+			Range.of("3fff::/20"), // documentation
 			Range.of("fc00::/7"), // unique-local, including fd00:ec2::254 (cloud metadata)
 			Range.of("fe80::/10"), // link-local
 			Range.of("fec0::/10"), // deprecated site-local

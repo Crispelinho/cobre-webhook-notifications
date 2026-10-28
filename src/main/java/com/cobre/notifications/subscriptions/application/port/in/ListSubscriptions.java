@@ -8,7 +8,8 @@ import com.cobre.notifications.subscriptions.domain.Subscription;
 public interface ListSubscriptions {
 
 	/**
-	 * Active and inactive subscriptions of the client, newest first.
+	 * Active and inactive subscriptions of the client, newest first; at most
+	 * {@link com.cobre.notifications.subscriptions.application.SubscriptionService#LIST_LIMIT}.
 	 */
 	List<Subscription> list(ClientId clientId);
 

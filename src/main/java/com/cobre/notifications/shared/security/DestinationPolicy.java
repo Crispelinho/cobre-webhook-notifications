@@ -11,16 +11,24 @@ import java.util.Objects;
 
 /**
  * Decides whether the service may send a webhook to a URL (OWASP API7, SSRF). A URL is accepted only if it uses
- * {@code https}, carries no user info, its host is in the allowlist and every address the host resolves to is public.
+ * {@code https} on the default port 443, carries no user info, its host is in the allowlist and every address the host
+ * resolves to is public.
  * <p>
  * Allowlist entries are exact host names; an entry starting with {@code .} (for example {@code .example.org}) also
  * allows that domain and all its subdomains. An empty allowlist rejects every URL.
  * <p>
- * Call {@link #check(String)} when a subscription is registered and again right before each delivery, then connect
+ * Call {@link #check(String)} when a subscription is registered and again right before each delivery (the allowlist
+ * or DNS may have changed since registration, and a subscription can be reactivated later), then connect
  * only to the returned {@link Destination#addresses()} so a DNS change between the check and the request (DNS
- * rebinding) cannot redirect the call to an internal address.
+ * rebinding) cannot redirect the call to an internal address. Keep {@link Destination#host()} for TLS SNI and the
+ * {@code Host} header.
+ * <p>
+ * The check resolves DNS on the calling thread and blocks until the resolver answers; delivery code should call it
+ * from a bounded worker, not from a request thread with no timeout.
  */
 public final class DestinationPolicy {
+
+	private static final int HTTPS_PORT = 443;
 
 	private final List<String> allowedHosts;
 
@@ -43,6 +51,9 @@ public final class DestinationPolicy {
 		URI uri = parse(url);
 		if (!"https".equalsIgnoreCase(uri.getScheme())) {
 			throw new RejectedDestinationException("only https is allowed");
+		}
+		if (uri.getPort() != -1 && uri.getPort() != HTTPS_PORT) {
+			throw new RejectedDestinationException("only port 443 is allowed");
 		}
 		if (uri.getRawUserInfo() != null) {
 			throw new RejectedDestinationException("user info is not allowed");
@@ -127,6 +138,10 @@ public final class DestinationPolicy {
 
 		List<InetAddress> resolve(String host) throws UnknownHostException;
 
+		/**
+		 * The JVM resolver ({@link InetAddress#getAllByName(String)}): blocking, with the operating system's timeouts and
+		 * the JVM's positive and negative caches.
+		 */
 		static HostResolver system() {
 			return host -> List.of(InetAddress.getAllByName(host));
 		}

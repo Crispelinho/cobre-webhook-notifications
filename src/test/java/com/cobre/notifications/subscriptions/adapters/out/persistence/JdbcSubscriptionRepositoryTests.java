@@ -64,7 +64,7 @@ class JdbcSubscriptionRepositoryTests {
 		repository.insert(subscription("S2", CLIENT_002, CREATED_AT, "a"), new byte[] { 1 });
 
 		assertThat(repository.findById(CLIENT_001, new SubscriptionId("S2"))).isEmpty();
-		assertThat(repository.findAll(CLIENT_001)).extracting(s -> s.id().value()).containsExactly("S1");
+		assertThat(repository.findAll(CLIENT_001, 10)).extracting(s -> s.id().value()).containsExactly("S1");
 	}
 
 	@Test
@@ -72,7 +72,18 @@ class JdbcSubscriptionRepositoryTests {
 		repository.insert(subscription("S1", CLIENT_001, CREATED_AT, "a"), new byte[] { 1 });
 		repository.insert(subscription("S2", CLIENT_001, CREATED_AT.plus(1, ChronoUnit.MINUTES), "a"), new byte[] { 1 });
 
-		assertThat(repository.findAll(CLIENT_001)).extracting(s -> s.id().value()).containsExactly("S2", "S1");
+		assertThat(repository.findAll(CLIENT_001, 10)).extracting(s -> s.id().value()).containsExactly("S2", "S1");
+		assertThat(repository.findAll(CLIENT_001, 1)).extracting(s -> s.id().value()).containsExactly("S2");
+	}
+
+	@Test
+	void countActiveIgnoresInactiveAndForeignSubscriptions() {
+		repository.insert(subscription("S1", CLIENT_001, CREATED_AT, "a"), new byte[] { 1 });
+		repository.insert(subscription("S2", CLIENT_001, CREATED_AT, "a"), new byte[] { 1 });
+		repository.insert(subscription("S3", CLIENT_002, CREATED_AT, "a"), new byte[] { 1 });
+		repository.update(CLIENT_001, new SubscriptionId("S2"), SubscriptionChanges.deactivation());
+
+		assertThat(repository.countActive(CLIENT_001)).isEqualTo(1);
 	}
 
 	@Test
