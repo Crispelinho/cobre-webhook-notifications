@@ -65,4 +65,14 @@ The delivery and security change uses a dual blind review: two independent revie
 Architecture docs (Task 1) and security docs (Task 3) depend only on the decision log.
 ```
 
-Parallel work in separate sessions and Git worktrees is proposed but not yet approved (see P01 and P02 in the [decision log](../architecture/decision-log.md#proposed-pending-approval)).
+## Parallel work
+
+Fronts run in separate sessions, each in its own Git worktree and feature branch, so changes never overlap in the working tree (decisions D45 and D46):
+
+| Front | Session | Starts when |
+|---|---|---|
+| Changes 1 → 2 → 3 (critical path) | Main session | Now |
+| Documentation and presentation (Tasks 1 and 3, Phase 6) | Parallel session | After the scaffold is in `develop` |
+| Change 4 (subscription management) | Parallel session | After change 1 is in `develop` |
+
+Flyway migration numbers are reserved per change (V1 query, V2 ingestion and outbox, V3 subscriptions, V4 replay, V5 observability and audit). Each branch is updated from `develop` after every squash merge.

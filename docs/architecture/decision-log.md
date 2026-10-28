@@ -75,10 +75,6 @@ All decisions taken during refinement and design (2026-10-28). Each one was appr
 | D42 | Unit tests for the domain; Testcontainers (PostgreSQL, Kafka) and WireMock over HTTPS for adapters; acceptance tests from OpenSpec scenarios. | — | Each layer tested with the right tool. | AI |
 | D43 | CI on every pull request: OpenSpec validation (`--strict`), Gradle build with tests, dependency graph submission and dependency review (fails on high severity). | Build only. | Quality does not depend on anyone's word. | Human + AI |
 | D44 | Implementation in the main session; a fresh-context AI reviewer audits each change before its pull request; dual blind review for the delivery and security change. | Delegate implementation to sub-agents. | All design context lives in the main session; the reviewer's value is independence. | AI |
-
-## Proposed, pending approval
-
-| ID | Proposal | Rationale |
-|---|---|---|
-| P01 | Parallel work in separate sessions and Git worktrees: implementation critical path (changes 1 → 2 → 3) in the main session; architecture docs (Task 1) and security docs (Task 3) in parallel sessions; subscription management (change 4) in parallel once change 1 is merged. At most three fronts at once. | Human review is the bottleneck, not the AI. |
-| P02 | Flyway migration numbers reserved per change (V1 query, V2 ingestion and outbox, V3 subscriptions, …). | Parallel branches do not collide. |
+| D45 | Parallel work in separate sessions and Git worktrees: implementation critical path (changes 1 → 2 → 3) in the main session; documentation and presentation in a parallel session; subscription management (change 4) in parallel once change 1 is merged. At most three fronts at once. | One session for everything. | Human review is the bottleneck, not the AI. | AI |
+| D46 | Flyway migration numbers reserved per change: V1 query schema, V2 ingestion and outbox, V3 subscription management, V4 replay, V5 observability and audit. | First come, first served. | Parallel branches do not collide. | AI |
+| D47 | The `add-self-service-query` specs are approved for implementation. | — | SDD human gate. | Human |
