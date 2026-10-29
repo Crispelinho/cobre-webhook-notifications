@@ -2,7 +2,7 @@
 
 Delivers platform events to client webhooks over HTTPS and gives clients a self-service REST API to query and replay their notifications. Built for the Cobre technical challenge.
 
-> **Status:** project scaffold. The first change (`add-self-service-query`) is specified and pending implementation. See [Roadmap](#roadmap).
+> **Status:** the five planned changes are merged into `develop`. Some decisions are not yet implemented (subscription limit, `Retry-After` cap and processing recovery) and are tracked in the [Roadmap](#roadmap) and in the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md).
 
 ## What it does
 
@@ -11,13 +11,16 @@ Delivers platform events to client webhooks over HTTPS and gives clients a self-
 - **Isolation:** a client only ever sees and receives its own notifications. Its identity comes from its access token, never from the request.
 - **Observability:** metrics, logs and alerts in near real time for the monitoring team.
 
-| Endpoint | Purpose | Status |
+| Endpoint | Purpose | Caller |
 |---|---|---|
-| `GET /notification_events` | List notification events with filters and pagination | Specified |
-| `GET /notification_events/{notification_event_id}` | Notification event detail with delivery attempts | Specified |
-| `POST /notification_events/{notification_event_id}/replay` | Re-send a failed notification event | Planned |
-| `POST /events` | Ingest a platform event (internal, service credentials) | Planned |
-| `/subscriptions` | Manage webhook subscriptions | Planned |
+| `GET /notification_events` | List notification events with filters and pagination | Client (`notifications:read`) |
+| `GET /notification_events/{notification_event_id}` | Notification event detail with delivery attempts | Client (`notifications:read`) |
+| `POST /notification_events/{notification_event_id}/replay` | Re-send a failed notification event (`202`) | Client (`notifications:replay`) |
+| `POST /events` | Ingest a platform event (`202`; `409` for a repeated `event_id`) | Producer (`events:write`) |
+| `POST /subscriptions` | Register a webhook subscription; the signing secret is returned once | Client (`subscriptions:write`) |
+| `GET /subscriptions`, `GET /subscriptions/{subscription_id}` | List and read subscriptions | Client (`subscriptions:read`) |
+| `PATCH /subscriptions/{subscription_id}` | Change `active` and `event_types` only | Client (`subscriptions:write`) |
+| `DELETE /subscriptions/{subscription_id}` | Deactivate a subscription | Client (`subscriptions:write`) |
 
 ## Architecture
 
@@ -66,14 +69,14 @@ docker compose up -d
 | Kafka | `9092` |
 | Grafana | [http://localhost:3000](http://localhost:3000) |
 
-The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` is expected to start these services automatically. Running the application end to end is verified in the first implemented change.
+The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` starts these services automatically. To run the full flow against a real HTTPS receiver, follow the [local HTTPS delivery runbook](docs/process/local-https-delivery-runbook.md). Profiles: `local` enables the development token issuer and loads the sample data; `demo` shortens the retry delays so a full round takes minutes. Use them together with `SPRING_PROFILES_ACTIVE=local,demo`.
 
 ### Webhook configuration
 
 | Variable | Required | Purpose |
 |---|---|---|
 | `WEBHOOK_SECRETS_KEY` | Yes, outside the `local` profile | Base64-encoded 256-bit AES key that encrypts webhook signing secrets at rest. The application does not start without it. Generate one with `openssl rand -base64 32`. |
-| `WEBHOOK_ALLOWED_HOSTS` | No (empty rejects every URL) | Comma-separated hosts that subscriptions may point to. An entry starting with `.` (for example `.example.org`) also allows that domain's subdomains. Only `https` on port 443 is accepted, and every resolved address must be public. |
+| `WEBHOOK_ALLOWED_HOSTS` | No (empty rejects every URL) | Comma-separated hosts that subscriptions may point to. An entry starting with `.` (for example `.example.org`) also allows that domain's subdomains. Only `https` on port 443 is accepted, and every resolved address must be public. The `local` profile allows `webhook.example.com`, which the sample data uses. |
 
 The `local` profile ships a development-only key; never reuse it elsewhere.
 
@@ -101,11 +104,17 @@ openspec validate --all --strict
 
 | # | OpenSpec change | Status |
 |---|---|---|
-| 1 | `add-self-service-query` | Specified |
-| 2 | `add-event-ingestion-and-delivery` | Planned |
-| 3 | `add-notification-replay` | Planned |
-| 4 | `add-subscription-management` | Planned |
-| 5 | `add-observability-and-audit` | Planned |
+| 1 | `add-self-service-query` | Merged and archived |
+| 2 | `add-event-ingestion-and-delivery` | Merged (#6); spec still in `openspec/changes/` |
+| 3 | `add-notification-replay` | Merged (#9); spec still in `openspec/changes/` |
+| 4 | `add-subscription-management` | Merged and archived |
+| 5 | `add-observability-and-audit` | Merged (#13); spec still in `openspec/changes/` |
+| 6 | `add-subscription-limits` | Specified, not implemented |
+| 7 | `add-retry-after-cap` | Specified, not implemented |
+| 8 | `add-processing-recovery` | Specified, not implemented |
+| 9 | `add-signed-delivery-rules` | Specified |
+
+Changes 6 to 9 come from the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md). Each one is specified in `openspec/changes/` before any code.
 
 ## Documentation
 
@@ -120,5 +129,8 @@ openspec validate --all --strict
 | [Decision log](docs/architecture/decision-log.md) | Every design decision with alternatives, rationale and origin |
 | [Security analysis](docs/security/security-analysis.md) | Threat model, OWASP API Top 10 mitigations and supply-chain findings |
 | [Workflow](docs/process/workflow.md) | SDD lifecycle, branching, commits, CI and AI review |
+| [Local HTTPS delivery runbook](docs/process/local-https-delivery-runbook.md) | Receiving a signed webhook over real HTTPS from a local run, with verified results |
+| [Discrepancy audit](docs/process/discrepancy-audit-2026-10-28.md) | Differences found between decisions, specs and code |
+| [Discrepancy reconciliation](docs/process/discrepancy-reconciliation-2026-10-28.md) | How each difference is resolved, and the pending work |
 | [OpenSpec project context](openspec/project.md) | Conventions, domain vocabulary and assumptions |
 | [AI usage log](docs/ai-usage/README.md) | How AI was used and validated in each phase |
