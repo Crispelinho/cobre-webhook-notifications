@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -12,11 +13,13 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
+import com.cobre.notifications.notifications.application.port.out.DeliveryMetrics;
 import com.cobre.notifications.notifications.application.port.out.DeliveryStore;
 import com.cobre.notifications.notifications.application.port.out.WebhookSender;
 import com.cobre.notifications.notifications.domain.AttemptResult;
 import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
+import com.cobre.notifications.notifications.domain.DeliveryOutcome;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
 import com.cobre.notifications.notifications.domain.TransportError;
@@ -191,6 +194,58 @@ class DeliveryServiceTests {
 	}
 
 	@Test
+	void everyRecordedAttemptIsObservedWithItsOutcomeAndLatency() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 503, 120);
+
+		observed.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(metrics.attempts).containsExactly(DeliveryOutcome.RETRYABLE + ":120");
+		assertThat(metrics.finals).isEmpty();
+	}
+
+	@Test
+	void theTimeFromCreationToTheFinalOutcomeIsObservedWhenTheEventCompletes() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender,
+				Clock.fixed(NOW.plusSeconds(90), ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+
+		observed.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(metrics.attempts).containsExactly(DeliveryOutcome.SUCCESS + ":20");
+		assertThat(metrics.finals).containsExactly(DeliveryStatus.COMPLETED + ":" + Duration.ofSeconds(90));
+	}
+
+	@Test
+	void exhaustedRetriesObserveAFailedFinalOutcome() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender,
+				Clock.fixed(NOW.plusSeconds(300), ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 5);
+
+		observed.failExhausted(new DispatchMessage("N1", 1));
+
+		assertThat(metrics.finals).containsExactly(DeliveryStatus.FAILED + ":" + Duration.ofSeconds(300));
+		assertThat(metrics.attempts).isEmpty();
+	}
+
+	@Test
+	void anAttemptLostToAConcurrentConsumerIsNotObserved() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.rejectNextWrite = true;
+
+		observed.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(metrics.attempts).isEmpty();
+		assertThat(metrics.finals).isEmpty();
+	}
+
+	@Test
 	void rejectsANonPositiveAttemptBudget() {
 		assertThatIllegalArgumentException().isThrownBy(() -> new DeliveryService(store, sender, Clock.systemUTC(), 0));
 	}
@@ -198,6 +253,28 @@ class DeliveryServiceTests {
 	private static Delivery delivery(DeliveryStatus status, int round, int attemptsInRound) {
 		return new Delivery(new NotificationEventId("N1"), "E1", "credit_deposit", "content",
 				"https://example.com/hook", NOW, status, round, attemptsInRound, null, null, null, 0);
+	}
+
+	private static final class RecordingMetrics implements DeliveryMetrics {
+
+		private final List<String> attempts = new ArrayList<>();
+
+		private final List<String> finals = new ArrayList<>();
+
+		@Override
+		public void attemptRecorded(DeliveryOutcome outcome, long latencyMs) {
+			attempts.add(outcome + ":" + latencyMs);
+		}
+
+		@Override
+		public void finalOutcome(DeliveryStatus status, Duration sinceCreation) {
+			finals.add(status + ":" + sinceCreation);
+		}
+
+		@Override
+		public void deadLettered() {
+		}
+
 	}
 
 	private static final class FakeStore implements DeliveryStore {

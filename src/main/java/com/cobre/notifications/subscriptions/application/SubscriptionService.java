@@ -6,6 +6,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+import com.cobre.notifications.audit.application.AuditEntry;
+import com.cobre.notifications.audit.application.AuditLog;
+import com.cobre.notifications.audit.application.AuditOutcome;
 import com.cobre.notifications.subscriptions.application.port.in.CreateSubscription;
 import com.cobre.notifications.subscriptions.application.port.in.DeactivateSubscription;
 import com.cobre.notifications.subscriptions.application.port.in.GetSubscription;
@@ -34,6 +37,8 @@ public class SubscriptionService
 	 */
 	public static final int LIST_LIMIT = 100;
 
+	private static final String NO_RESOURCE = "none";
+
 	private final SubscriptionRepository repository;
 
 	private final DestinationValidator destinationValidator;
@@ -42,18 +47,34 @@ public class SubscriptionService
 
 	private final Clock clock;
 
+	private final AuditLog audit;
+
 	public SubscriptionService(SubscriptionRepository repository, DestinationValidator destinationValidator,
-			SecretIssuer secretIssuer, Clock clock) {
+			SecretIssuer secretIssuer, Clock clock, AuditLog audit) {
 		this.repository = Objects.requireNonNull(repository);
 		this.destinationValidator = Objects.requireNonNull(destinationValidator);
 		this.secretIssuer = Objects.requireNonNull(secretIssuer);
 		this.clock = Objects.requireNonNull(clock);
+		this.audit = Objects.requireNonNull(audit);
 	}
 
 	@Override
 	public CreatedSubscription create(ClientId clientId, WebhookUrl url, EventTypes eventTypes) {
 		Objects.requireNonNull(clientId);
 		Objects.requireNonNull(eventTypes);
+		try {
+			CreatedSubscription created = doCreate(clientId, url, eventTypes);
+			audit(clientId, AuditEntry.SUBSCRIPTION_CREATE, created.subscription().id().value(), AuditOutcome.SUCCESS);
+			return created;
+		}
+		catch (InvalidSubscriptionException ex) {
+			// No subscription exists, so there is no resource ID to record.
+			audit(clientId, AuditEntry.SUBSCRIPTION_CREATE, NO_RESOURCE, AuditOutcome.REJECTED);
+			throw ex;
+		}
+	}
+
+	private CreatedSubscription doCreate(ClientId clientId, WebhookUrl url, EventTypes eventTypes) {
 		// Checked before anything is generated or stored. Two concurrent requests can both pass the limit check; the
 		// limit is a guard against abuse, not an exact quota.
 		if (repository.countActive(clientId) >= MAX_ACTIVE_PER_CLIENT) {
@@ -80,13 +101,27 @@ public class SubscriptionService
 
 	@Override
 	public Optional<Subscription> update(ClientId clientId, SubscriptionId id, SubscriptionChanges changes) {
-		return repository.update(Objects.requireNonNull(clientId), Objects.requireNonNull(id),
-				Objects.requireNonNull(changes));
+		Objects.requireNonNull(clientId);
+		Objects.requireNonNull(id);
+		Optional<Subscription> updated = repository.update(clientId, id, Objects.requireNonNull(changes));
+		audit(clientId, AuditEntry.SUBSCRIPTION_UPDATE, id.value(),
+				updated.isPresent() ? AuditOutcome.SUCCESS : AuditOutcome.NOT_FOUND);
+		return updated;
 	}
 
 	@Override
 	public boolean deactivate(ClientId clientId, SubscriptionId id) {
-		return update(clientId, id, SubscriptionChanges.deactivation()).isPresent();
+		Objects.requireNonNull(clientId);
+		Objects.requireNonNull(id);
+		// Straight to the repository: going through update() would write a second, misleading audit entry.
+		boolean found = repository.update(clientId, id, SubscriptionChanges.deactivation()).isPresent();
+		audit(clientId, AuditEntry.SUBSCRIPTION_DEACTIVATE, id.value(),
+				found ? AuditOutcome.SUCCESS : AuditOutcome.NOT_FOUND);
+		return found;
+	}
+
+	private void audit(ClientId clientId, String action, String resourceId, AuditOutcome outcome) {
+		audit.record(new AuditEntry(clientId.value(), action, resourceId, outcome));
 	}
 
 }

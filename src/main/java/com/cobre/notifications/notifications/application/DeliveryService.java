@@ -1,6 +1,7 @@
 package com.cobre.notifications.notifications.application;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -9,11 +10,13 @@ import org.slf4j.LoggerFactory;
 
 import com.cobre.notifications.notifications.application.port.in.DeliverNotification;
 import com.cobre.notifications.notifications.application.port.in.FailExhaustedNotification;
+import com.cobre.notifications.notifications.application.port.out.DeliveryMetrics;
 import com.cobre.notifications.notifications.application.port.out.DeliveryStore;
 import com.cobre.notifications.notifications.application.port.out.WebhookSender;
 import com.cobre.notifications.notifications.domain.AttemptResult;
 import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
+import com.cobre.notifications.notifications.domain.DeliveryStatus;
 
 /**
  * Delivers one notification event per dispatch message. A message for a final notification event or for an earlier
@@ -32,7 +35,14 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 
 	private final int maxAttempts;
 
+	private final DeliveryMetrics metrics;
+
 	public DeliveryService(DeliveryStore store, WebhookSender sender, Clock clock, int maxAttempts) {
+		this(store, sender, clock, maxAttempts, DeliveryMetrics.NONE);
+	}
+
+	public DeliveryService(DeliveryStore store, WebhookSender sender, Clock clock, int maxAttempts,
+			DeliveryMetrics metrics) {
 		if (maxAttempts < 1) {
 			throw new IllegalArgumentException("maxAttempts must be at least 1");
 		}
@@ -40,6 +50,7 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 		this.sender = Objects.requireNonNull(sender);
 		this.clock = Objects.requireNonNull(clock);
 		this.maxAttempts = maxAttempts;
+		this.metrics = Objects.requireNonNull(metrics);
 	}
 
 	@Override
@@ -69,6 +80,12 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 					attempt.attemptNumber(), message.notificationEventId(), message.round());
 			return DeliveryResult.IGNORED;
 		}
+		metrics.attemptRecorded(result.outcome(), result.latencyMs());
+		log.info("Attempt {} of notification event {} round {} recorded: {}", attempt.attemptNumber(),
+				message.notificationEventId(), message.round(), result.outcome());
+		if (after.status() == DeliveryStatus.COMPLETED || after.status() == DeliveryStatus.FAILED) {
+			recordFinal(after);
+		}
 		return switch (result.outcome()) {
 			case SUCCESS -> DeliveryResult.DELIVERED;
 			case RETRYABLE -> DeliveryResult.RETRY;
@@ -93,7 +110,18 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 	}
 
 	private boolean exhaust(Delivery delivery) {
-		return store.updateState(delivery, delivery.exhausted(clock.instant()));
+		Delivery after = delivery.exhausted(clock.instant());
+		if (!store.updateState(delivery, after)) {
+			return false;
+		}
+		recordFinal(after);
+		return true;
+	}
+
+	private void recordFinal(Delivery after) {
+		if (after.createdAt() != null && after.deliveryDate() != null) {
+			metrics.finalOutcome(after.status(), Duration.between(after.createdAt(), after.deliveryDate()));
+		}
 	}
 
 }
