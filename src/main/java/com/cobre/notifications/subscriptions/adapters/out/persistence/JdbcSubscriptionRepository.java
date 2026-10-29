@@ -13,10 +13,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cobre.notifications.subscriptions.application.SubscriptionChanges;
 import com.cobre.notifications.subscriptions.application.port.out.SubscriptionRepository;
-import com.cobre.notifications.subscriptions.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.subscriptions.domain.EventTypes;
 import com.cobre.notifications.subscriptions.domain.Subscription;
 import com.cobre.notifications.subscriptions.domain.SubscriptionId;
+import com.cobre.notifications.subscriptions.domain.SubscriptionLimitReachedException;
 import com.cobre.notifications.subscriptions.domain.WebhookUrl;
 
 /**
@@ -97,6 +98,42 @@ class JdbcSubscriptionRepository implements SubscriptionRepository {
 			.param("id", id.value())
 			.query((rs, rowNum) -> toSubscription(rs))
 			.optional();
+	}
+
+	@Override
+	public boolean insertIfBelowLimit(Subscription subscription, byte[] secretCiphertext, int activeLimit) {
+		lockClient(subscription.clientId());
+		if (countActive(subscription.clientId()) >= activeLimit) {
+			return false;
+		}
+		insert(subscription, secretCiphertext);
+		return true;
+	}
+
+	@Override
+	public Optional<Subscription> updateWithinLimit(ClientId clientId, SubscriptionId id, SubscriptionChanges changes,
+			int activeLimit) {
+		lockClient(clientId);
+		Optional<Subscription> current = findById(clientId, id);
+		if (current.isEmpty()) {
+			return Optional.empty();
+		}
+		boolean reactivating = Boolean.TRUE.equals(changes.active()) && !current.get().active();
+		if (reactivating && countActive(clientId) >= activeLimit) {
+			throw new SubscriptionLimitReachedException(activeLimit);
+		}
+		return update(clientId, id, changes);
+	}
+
+	/**
+	 * Holds a transaction-scoped lock for one client, so the count and the write that follow cannot interleave with
+	 * another request of the same client. The lock is released at commit or rollback.
+	 */
+	private void lockClient(ClientId clientId) {
+		jdbc.sql("SELECT pg_advisory_xact_lock(hashtext(:clientId))")
+			.param("clientId", clientId.value())
+			.query()
+			.listOfRows();
 	}
 
 	private static String[] eventTypesArray(EventTypes eventTypes) {

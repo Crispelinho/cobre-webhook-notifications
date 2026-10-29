@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.cobre.notifications.subscriptions.domain.InvalidSubscriptionException;
+import com.cobre.notifications.subscriptions.domain.SubscriptionLimitReachedException;
 
 /**
  * Maps request errors of {@link SubscriptionController} to RFC 9457 problems. Runs before Spring's generic problem
@@ -28,6 +29,13 @@ class SubscriptionExceptionHandler {
 	@ExceptionHandler(InvalidSubscriptionException.class)
 	ProblemDetail invalidSubscription(InvalidSubscriptionException ex) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+	}
+
+	@ExceptionHandler(SubscriptionLimitReachedException.class)
+	ProblemDetail limitReached(SubscriptionLimitReachedException ex) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+		problem.setProperty("code", SubscriptionLimitReachedException.CODE);
+		return problem;
 	}
 
 	@ExceptionHandler(HttpMessageNotReadableException.class)

@@ -3,7 +3,7 @@ package com.cobre.notifications.notifications.application.port.out;
 import java.time.Instant;
 import java.util.Optional;
 
-import com.cobre.notifications.notifications.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
 

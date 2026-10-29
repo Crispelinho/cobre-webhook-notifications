@@ -13,7 +13,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.cobre.notifications.notifications.application.port.out.ReplayStore;
-import com.cobre.notifications.notifications.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;

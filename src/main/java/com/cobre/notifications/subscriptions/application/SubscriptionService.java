@@ -17,11 +17,12 @@ import com.cobre.notifications.subscriptions.application.port.in.UpdateSubscript
 import com.cobre.notifications.subscriptions.application.port.out.DestinationValidator;
 import com.cobre.notifications.subscriptions.application.port.out.SecretIssuer;
 import com.cobre.notifications.subscriptions.application.port.out.SubscriptionRepository;
-import com.cobre.notifications.subscriptions.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.subscriptions.domain.EventTypes;
 import com.cobre.notifications.subscriptions.domain.InvalidSubscriptionException;
 import com.cobre.notifications.subscriptions.domain.Subscription;
 import com.cobre.notifications.subscriptions.domain.SubscriptionId;
+import com.cobre.notifications.subscriptions.domain.SubscriptionLimitReachedException;
 import com.cobre.notifications.subscriptions.domain.WebhookUrl;
 
 public class SubscriptionService
@@ -67,7 +68,7 @@ public class SubscriptionService
 			audit(clientId, AuditEntry.SUBSCRIPTION_CREATE, created.subscription().id().value(), AuditOutcome.SUCCESS);
 			return created;
 		}
-		catch (InvalidSubscriptionException ex) {
+		catch (InvalidSubscriptionException | SubscriptionLimitReachedException ex) {
 			// No subscription exists, so there is no resource ID to record.
 			audit(clientId, AuditEntry.SUBSCRIPTION_CREATE, NO_RESOURCE, AuditOutcome.REJECTED);
 			throw ex;
@@ -75,17 +76,14 @@ public class SubscriptionService
 	}
 
 	private CreatedSubscription doCreate(ClientId clientId, WebhookUrl url, EventTypes eventTypes) {
-		// Checked before anything is generated or stored. Two concurrent requests can both pass the limit check; the
-		// limit is a guard against abuse, not an exact quota.
-		if (repository.countActive(clientId) >= MAX_ACTIVE_PER_CLIENT) {
-			throw new InvalidSubscriptionException(
-					"the client already has the maximum of " + MAX_ACTIVE_PER_CLIENT + " active subscriptions");
-		}
 		destinationValidator.validate(Objects.requireNonNull(url));
 		Instant now = clock.instant();
 		Subscription subscription = Subscription.create(SubscriptionId.generate(now), clientId, url, eventTypes, now);
 		IssuedSecret secret = secretIssuer.issue(subscription.id());
-		repository.insert(subscription, secret.ciphertext());
+		// The limit is checked and enforced by the repository in the same transaction as the insert (decision 3).
+		if (!repository.insertIfBelowLimit(subscription, secret.ciphertext(), MAX_ACTIVE_PER_CLIENT)) {
+			throw new SubscriptionLimitReachedException(MAX_ACTIVE_PER_CLIENT);
+		}
 		return new CreatedSubscription(subscription, secret.value());
 	}
 
@@ -103,7 +101,16 @@ public class SubscriptionService
 	public Optional<Subscription> update(ClientId clientId, SubscriptionId id, SubscriptionChanges changes) {
 		Objects.requireNonNull(clientId);
 		Objects.requireNonNull(id);
-		Optional<Subscription> updated = repository.update(clientId, id, Objects.requireNonNull(changes));
+		Objects.requireNonNull(changes);
+		// Reactivation is limited inside the repository, in the same transaction as the write (decision 3).
+		Optional<Subscription> updated;
+		try {
+			updated = repository.updateWithinLimit(clientId, id, changes, MAX_ACTIVE_PER_CLIENT);
+		}
+		catch (SubscriptionLimitReachedException ex) {
+			audit(clientId, AuditEntry.SUBSCRIPTION_UPDATE, id.value(), AuditOutcome.REJECTED);
+			throw ex;
+		}
 		audit(clientId, AuditEntry.SUBSCRIPTION_UPDATE, id.value(),
 				updated.isPresent() ? AuditOutcome.SUCCESS : AuditOutcome.NOT_FOUND);
 		return updated;

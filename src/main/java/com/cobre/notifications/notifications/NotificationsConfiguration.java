@@ -33,8 +33,8 @@ class NotificationsConfiguration {
 	}
 
 	@Bean
-	ReplayNotificationEventUseCase replayNotificationEvent(ReplayStore replayStore, AuditLog auditLog) {
-		return new ReplayNotificationEventUseCase(replayStore, Clock.systemUTC(), auditLog);
+	ReplayNotificationEventUseCase replayNotificationEvent(ReplayStore replayStore, AuditLog auditLog, Clock clock) {
+		return new ReplayNotificationEventUseCase(replayStore, clock, auditLog);
 	}
 
 	@Bean
@@ -45,8 +45,8 @@ class NotificationsConfiguration {
 
 	@Bean
 	DeliveryService deliveryService(DeliveryStore store, WebhookSender sender,
-			@Value("${app.delivery.retry.max-attempts:5}") int maxAttempts, DeliveryMetrics metrics) {
-		return new DeliveryService(store, sender, Clock.systemUTC(), maxAttempts, metrics);
+			@Value("${app.delivery.retry.max-attempts:5}") int maxAttempts, DeliveryMetrics metrics, Clock clock) {
+		return new DeliveryService(store, sender, clock, maxAttempts, metrics);
 	}
 
 }

@@ -12,7 +12,7 @@ import com.cobre.notifications.audit.application.AuditLog;
 import com.cobre.notifications.audit.application.AuditOutcome;
 import com.cobre.notifications.notifications.application.port.in.ReplayNotificationEvent;
 import com.cobre.notifications.notifications.application.port.out.ReplayStore;
-import com.cobre.notifications.notifications.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.notifications.domain.NotReplayableException;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
