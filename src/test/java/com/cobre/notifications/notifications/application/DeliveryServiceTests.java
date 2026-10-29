@@ -134,6 +134,82 @@ class DeliveryServiceTests {
 	}
 
 	@Test
+	void aValidRetryAfterSchedulesTheNextAttemptExactlyThatFarAheadWithoutARetryTopicMessage() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(120));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+
+		assertThat(store.delay).isEqualTo(Duration.ofSeconds(120));
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+		assertThat(store.attempts).singleElement().extracting(DeliveryAttempt::errorType).isEqualTo("http_429");
+	}
+
+	@Test
+	void aRetryAfterOfZeroIsHonouredAsDueNow() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 503, 20, Duration.ZERO);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+
+		assertThat(store.delay).isEqualTo(Duration.ZERO);
+	}
+
+	@Test
+	void aRetryAfterAboveTheCapSchedulesAtTheCapNeverEarlier() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 503, 20, Duration.ofSeconds(86_400));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+
+		assertThat(store.delay).isEqualTo(Duration.ofSeconds(300));
+	}
+
+	@Test
+	void theCapIsConfigurable() {
+		DeliveryService capped = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5,
+				DeliveryMetrics.NONE, DeliveryService.DEFAULT_LEASE_DURATION, Duration.ofSeconds(60));
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(120));
+
+		capped.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(store.delay).isEqualTo(Duration.ofSeconds(60));
+	}
+
+	@Test
+	void aRetryableAnswerWithoutRetryAfterKeepsTheConfiguredBackoff() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+
+		assertThat(store.delay).isNull();
+	}
+
+	@Test
+	void retryAfterNeverAddsAttemptsAndASixthRequestIsNeverSent() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(5));
+
+		for (int attempt = 1; attempt <= 4; attempt++) {
+			assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+			// The scheduler clears the time and enqueues a message; simulate that claim.
+			store.current = withoutNextAttempt(store.current);
+		}
+		// The fifth attempt uses the last one: nothing is scheduled, the normal exhaustion path takes over.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+		assertThat(store.delay).isNull();
+		assertThat(store.attempts).hasSize(5);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+
+		assertThat(sent).hasSize(5);
+		assertThat(store.attempts).hasSize(5);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+	}
+
+	@Test
 	void aCompletedNotificationKeepsItsSuccessWhenTheSubscriptionIsLaterInactive() {
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
 		service.deliver(new DispatchMessage("N1", 1));
@@ -143,6 +219,32 @@ class DeliveryServiceTests {
 		assertThat(sent).hasSize(1);
 		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
 		assertThat(store.current.lastError()).isNull();
+	}
+
+	@Test
+	void aMessageThatArrivesBeforeTheScheduledTimeSendsNothing() {
+		store.current = withNextAttempt(delivery(DeliveryStatus.RETRYING, 1, 1), NOW.plusSeconds(60));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.attempts).isEmpty();
+		assertThat(store.current.nextAttemptAt()).isEqualTo(NOW.plusSeconds(60));
+		assertThat(store.delay).isNull();
+	}
+
+	@Test
+	void aRetryAfterOnTheFifthAttemptSendsNoSixthRequestAndSchedulesNoRow() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(30));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+
+		assertThat(store.attempts).hasSize(1);
+		assertThat(store.delay).isNull();
+		assertThat(store.current.nextAttemptAt()).isNull();
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+		assertThat(sent).hasSize(1);
 	}
 
 	@Test
@@ -366,6 +468,16 @@ class DeliveryServiceTests {
 		assertThatIllegalArgumentException().isThrownBy(() -> new DeliveryService(store, sender, Clock.systemUTC(), 0));
 	}
 
+	private static Delivery withNextAttempt(Delivery d, Instant at) {
+		return new Delivery(d.id(), d.eventId(), d.eventType(), d.content(), d.destinationUrl(), d.createdAt(),
+				d.status(), d.round(), d.attemptsInRound(), d.deliveryDate(), d.deliveredAt(), d.lastError(),
+				d.version(), d.subscriptionId(), d.secretCiphertext(), at);
+	}
+
+	private static Delivery withoutNextAttempt(Delivery d) {
+		return withNextAttempt(d, null);
+	}
+
 	private static Delivery delivery(DeliveryStatus status, int round, int attemptsInRound) {
 		return new Delivery(new NotificationEventId("N1"), "E1", "credit_deposit", "content",
 				"https://example.com/hook", NOW, status, round, attemptsInRound, null, null, null, 0);
@@ -407,6 +519,8 @@ class DeliveryServiceTests {
 
 		private int claims;
 
+		private Duration delay;
+
 		private final List<Long> writeTokens = new ArrayList<>();
 
 		/** Another worker reclaims the event and records a successful attempt: the token moves on. */
@@ -433,6 +547,12 @@ class DeliveryServiceTests {
 
 		@Override
 		public boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after) {
+			return recordAttempt(lease, before, attempt, after, null);
+		}
+
+		@Override
+		public boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after,
+				Duration next) {
 			if (lease.generation() != generation) {
 				return false;
 			}
@@ -442,7 +562,9 @@ class DeliveryServiceTests {
 				return false;
 			}
 			attempts.add(attempt);
-			current = after;
+			delay = next;
+			// The real store writes now() + delay; any non-null time marks the row as scheduled.
+			current = next == null ? after : withNextAttempt(after, NOW.plus(next));
 			return true;
 		}
 

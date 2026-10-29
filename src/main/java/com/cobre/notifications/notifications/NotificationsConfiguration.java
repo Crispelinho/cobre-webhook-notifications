@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 import com.cobre.notifications.audit.application.AuditLog;
 import com.cobre.notifications.notifications.application.DeliveryService;
+import com.cobre.notifications.notifications.application.EnqueueDueAttempts;
 import com.cobre.notifications.notifications.application.NotificationQueryService;
 import com.cobre.notifications.notifications.application.RecoverInterruptedDeliveries;
 import com.cobre.notifications.notifications.application.RelayOutbox;
@@ -20,6 +21,7 @@ import com.cobre.notifications.notifications.application.port.out.DispatchPublis
 import com.cobre.notifications.notifications.application.port.out.LeaseRecoveryStore;
 import com.cobre.notifications.notifications.application.port.out.NotificationQueryPort;
 import com.cobre.notifications.notifications.application.port.out.OutboxPort;
+import com.cobre.notifications.notifications.application.port.out.ScheduledAttemptPort;
 import com.cobre.notifications.notifications.application.port.out.ReplayStore;
 import com.cobre.notifications.notifications.application.port.out.WebhookSender;
 
@@ -49,8 +51,9 @@ class NotificationsConfiguration {
 	@Bean
 	DeliveryService deliveryService(DeliveryStore store, WebhookSender sender,
 			@Value("${app.delivery.retry.max-attempts:5}") int maxAttempts, DeliveryMetrics metrics, Clock clock,
-			@Value("${app.delivery.lease.duration:PT60S}") Duration leaseDuration) {
-		return new DeliveryService(store, sender, clock, maxAttempts, metrics, leaseDuration);
+			@Value("${app.delivery.lease.duration:PT60S}") Duration leaseDuration,
+			@Value("${app.delivery.retry-after-cap:PT300S}") Duration retryAfterCap) {
+		return new DeliveryService(store, sender, clock, maxAttempts, metrics, leaseDuration, retryAfterCap);
 	}
 
 	@Bean
@@ -58,6 +61,12 @@ class NotificationsConfiguration {
 			@Value("${app.delivery.retry.max-attempts:5}") int maxAttempts,
 			@Value("${app.delivery.lease.recovery.batch-size:100}") int batchSize) {
 		return new RecoverInterruptedDeliveries(store, clock, maxAttempts, batchSize);
+	}
+
+	@Bean
+	EnqueueDueAttempts enqueueDueAttempts(ScheduledAttemptPort scheduledAttempts,
+			@Value("${app.delivery.next-attempt.batch-size:100}") int batchSize) {
+		return new EnqueueDueAttempts(scheduledAttempts, batchSize);
 	}
 
 }

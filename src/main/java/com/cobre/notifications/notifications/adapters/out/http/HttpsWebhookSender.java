@@ -8,6 +8,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoField;
+import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -176,7 +184,8 @@ class HttpsWebhookSender implements WebhookSender {
 					if (expired.get() || elapsedNanos(started) >= requestTimeout.toNanos()) {
 						return AttemptResult.failure(attemptedAt, TransportError.TIMEOUT, elapsedMs(started));
 					}
-					return AttemptResult.response(attemptedAt, response.getCode(), elapsedMs(started));
+					return AttemptResult.response(attemptedAt, response.getCode(), elapsedMs(started),
+							retryAfter(response, attemptedAt));
 				}
 				finally {
 					discard(response);
@@ -190,6 +199,77 @@ class HttpsWebhookSender implements WebhookSender {
 			}
 		}
 		return failed(delivery, attemptedAt, started, expired.get() ? null : lastRefused);
+	}
+
+	/**
+	 * The delay of a valid {@code Retry-After}, read on a 429 or 503 only. Null when the header is missing, invalid or
+	 * cannot be parsed: the caller then keeps the normal backoff. A past date or 0 is due immediately.
+	 */
+	private static Duration retryAfter(ClassicHttpResponse response, Instant now) {
+		int status = response.getCode();
+		if (status != 429 && status != 503) {
+			return null;
+		}
+		org.apache.hc.core5.http.Header header = response.getFirstHeader("Retry-After");
+		return header == null ? null : parseRetryAfter(header.getValue(), now);
+	}
+
+	/**
+	 * Accepts delta-seconds ({@code 120}) and an HTTP-date ({@code Wed, 21 Oct 2026 07:28:00 GMT}). A number too large
+	 * for a long is still a valid, huge delay; the service caps it.
+	 */
+	static Duration parseRetryAfter(String value, Instant now) {
+		if (value == null) {
+			return null;
+		}
+		String trimmed = value.trim();
+		if (trimmed.matches("[0-9]+")) {
+			try {
+				return Duration.ofSeconds(Long.parseLong(trimmed));
+			}
+			catch (NumberFormatException ex) {
+				return Duration.ofSeconds(Long.MAX_VALUE);
+			}
+		}
+		Instant at = parseHttpDate(trimmed, now);
+		if (at == null) {
+			return null;
+		}
+		// A date at or before now means "due immediately": the same as 0, still through the scheduler.
+		return at.isBefore(now) ? Duration.ZERO : Duration.between(now, at);
+	}
+
+	/**
+	 * The three HTTP-date formats of RFC 9110: IMF-fixdate ({@code Sun, 06 Nov 1994 08:49:37 GMT}), the obsolete RFC 850
+	 * form ({@code Sunday, 06-Nov-94 08:49:37 GMT}) and asctime ({@code Sun Nov  6 08:49:37 1994}). All are UTC. A
+	 * two-digit year is read as the one within 50 years of {@code now}, as the RFC asks.
+	 */
+	private static Instant parseHttpDate(String value, Instant now) {
+		int baseYear = now.atOffset(ZoneOffset.UTC).getYear() - 50;
+		DateTimeFormatter rfc850 = new DateTimeFormatterBuilder().parseCaseSensitive()
+			.appendPattern("EEEE, dd-MMM-")
+			.appendValueReduced(ChronoField.YEAR, 2, 2, baseYear)
+			.appendPattern(" HH:mm:ss 'GMT'")
+			.toFormatter(Locale.ENGLISH);
+		try {
+			return OffsetDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
+		}
+		catch (DateTimeParseException ignored) {
+			// try the next format
+		}
+		try {
+			return LocalDateTime.parse(value, rfc850).toInstant(ZoneOffset.UTC);
+		}
+		catch (DateTimeParseException ignored) {
+			// try the next format
+		}
+		try {
+			return LocalDateTime.parse(value, DateTimeFormatter.ofPattern("EEE MMM ppd HH:mm:ss yyyy", Locale.ENGLISH))
+				.toInstant(ZoneOffset.UTC);
+		}
+		catch (DateTimeParseException | ArithmeticException ex) {
+			return null;
+		}
 	}
 
 	/**

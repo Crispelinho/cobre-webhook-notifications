@@ -129,6 +129,16 @@ class DeliveryTests {
 		assertThatIllegalArgumentException().isThrownBy(() -> new AttemptResult(SENT, null, null, 1));
 	}
 
+	@Test
+	void retryAfterIsOnlyCarriedByA429Or503() {
+		assertThat(AttemptResult.response(SENT, 429, 1, java.time.Duration.ofSeconds(5)).retryAfter()).isNotNull();
+		assertThat(AttemptResult.response(SENT, 503, 1, java.time.Duration.ofSeconds(5)).retryAfter()).isNotNull();
+		assertThatIllegalArgumentException()
+			.isThrownBy(() -> AttemptResult.response(SENT, 500, 1, java.time.Duration.ofSeconds(5)));
+		assertThatIllegalArgumentException()
+			.isThrownBy(() -> AttemptResult.response(SENT, 503, 1, java.time.Duration.ofSeconds(-1)));
+	}
+
 	/** Round 2, so tests also prove messages are matched against the current round. */
 	private static Delivery delivery(DeliveryStatus status, int attemptsInRound) {
 		return new Delivery(new NotificationEventId("N1"), "E1", "credit_deposit", "content",

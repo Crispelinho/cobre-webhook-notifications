@@ -516,6 +516,107 @@ class HttpsWebhookSenderTests {
 	/**
 	 * A policy-valid URL: the test client redirects it to the local receiver, keeping the path.
 	 */
+	@Test
+	void aRetryAfterInSecondsOnA429IsCarried() {
+		receiver.stubFor(post("/ra").willReturn(aResponse().withStatus(429).withHeader("Retry-After", "120")));
+
+		AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(delivery(url("/ra")));
+
+		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.RETRYABLE);
+		assertThat(result.retryAfter()).isEqualTo(Duration.ofSeconds(120));
+	}
+
+	@Test
+	void aRetryAfterHttpDateOnA503IsCarriedRelativeToTheAttempt() {
+		receiver.stubFor(post("/ra").willReturn(
+				aResponse().withStatus(503).withHeader("Retry-After", "Thu, 01 Jan 2026 00:02:00 GMT")));
+
+		AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(delivery(url("/ra")));
+
+		assertThat(result.retryAfter()).isEqualTo(Duration.ofSeconds(120));
+	}
+
+	@Test
+	void aPastRetryAfterDateOnA503IsDueImmediatelyNotABackoff() {
+		receiver.stubFor(post("/ra").willReturn(
+				aResponse().withStatus(503).withHeader("Retry-After", "Wed, 31 Dec 2025 23:59:00 GMT")));
+
+		AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(delivery(url("/ra")));
+
+		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.RETRYABLE);
+		assertThat(result.retryAfter()).isEqualTo(Duration.ZERO);
+	}
+
+	@Test
+	void anInvalidRetryAfterFallsBackToTheBackoff() {
+		for (String invalid : List.of("soon", "-5", "1.5", "", "12 seconds")) {
+			receiver.stubFor(post("/ra").willReturn(aResponse().withStatus(429).withHeader("Retry-After", invalid)));
+
+			AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(delivery(url("/ra")));
+
+			assertThat(result.retryAfter()).as("Retry-After '%s'", invalid).isNull();
+		}
+	}
+
+	@Test
+	void retryAfterOnAnyOtherStatusIsIgnored() {
+		for (int status : List.of(500, 502, 408)) {
+			receiver.stubFor(post("/ra").willReturn(aResponse().withStatus(status).withHeader("Retry-After", "120")));
+
+			AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(delivery(url("/ra")));
+
+			assertThat(result.outcome()).isEqualTo(DeliveryOutcome.RETRYABLE);
+			assertThat(result.retryAfter()).as("status %d", status).isNull();
+		}
+	}
+
+	@Test
+	void a429WithoutRetryAfterCarriesNoDelay() {
+		receiver.stubFor(post("/ra").willReturn(aResponse().withStatus(429)));
+
+		AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(delivery(url("/ra")));
+
+		assertThat(result.retryAfter()).isNull();
+	}
+
+	@Test
+	void everyRfc9110HttpDateFormatIsAccepted() {
+		Duration expected = Duration.ofSeconds(120);
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thu, 01 Jan 2026 00:02:00 GMT", NOW)).isEqualTo(expected);
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thursday, 01-Jan-26 00:02:00 GMT", NOW)).isEqualTo(expected);
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thu Jan  1 00:02:00 2026", NOW)).isEqualTo(expected);
+	}
+
+	@Test
+	void aPastDateInAnyRfc9110FormatIsDueImmediatelyLikeZero() {
+		assertThat(HttpsWebhookSender.parseRetryAfter("Wed, 31 Dec 2025 23:59:00 GMT", NOW)).isEqualTo(Duration.ZERO);
+		assertThat(HttpsWebhookSender.parseRetryAfter("Wednesday, 31-Dec-25 23:59:00 GMT", NOW))
+			.isEqualTo(Duration.ZERO);
+		assertThat(HttpsWebhookSender.parseRetryAfter("Wed Dec 31 23:59:00 2025", NOW)).isEqualTo(Duration.ZERO);
+	}
+
+	@Test
+	void aDateEqualToNowAndAValueOfZeroGiveTheSameResultAsAPastDate() {
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thu, 01 Jan 2026 00:00:00 GMT", NOW)).isEqualTo(Duration.ZERO);
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thursday, 01-Jan-26 00:00:00 GMT", NOW)).isEqualTo(Duration.ZERO);
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thu Jan  1 00:00:00 2026", NOW)).isEqualTo(Duration.ZERO);
+		assertThat(HttpsWebhookSender.parseRetryAfter("0", NOW)).isEqualTo(Duration.ZERO);
+	}
+
+	@Test
+	void anInvalidHttpDateInAnyFormatFallsBackToBackoff() {
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thu, 32 Jan 2026 00:02:00 GMT", NOW)).isNull();
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thursday, 01-Foo-26 00:02:00 GMT", NOW)).isNull();
+		assertThat(HttpsWebhookSender.parseRetryAfter("Thu Jan  1 25:02:00 2026", NOW)).isNull();
+		assertThat(HttpsWebhookSender.parseRetryAfter("soon", NOW)).isNull();
+	}
+
+	@Test
+	void aHugeRetryAfterIsStillAValidDelayForTheServiceToCap() {
+		assertThat(HttpsWebhookSender.parseRetryAfter("99999999999999999999999", NOW)).isNotNull();
+		assertThat(HttpsWebhookSender.parseRetryAfter("0", NOW)).isEqualTo(Duration.ZERO);
+	}
+
 	private static String url(String path) {
 		return "https://hooks.example.org" + path;
 	}
