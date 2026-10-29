@@ -40,3 +40,7 @@ out/
 .atl/
 .claude/settings.local.json
 .local/
+
+### Secrets ###
+.env
+*.pem
