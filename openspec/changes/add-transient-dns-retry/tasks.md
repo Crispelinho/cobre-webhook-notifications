@@ -3,7 +3,7 @@
 ## 1. Approval
 
 - [x] 1.1 Developer approves retrying every DNS failure at send time; decision-log entry D54 added
-- [ ] 1.2 Developer approves the `error_type` value `dns_error`
+- [x] 1.2 Developer approves the `error_type` value `dns_error`; decision-log entry D66 added
 
 ## 2. Tests first (D41)
 
