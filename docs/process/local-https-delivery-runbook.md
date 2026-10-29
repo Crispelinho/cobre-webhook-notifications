@@ -186,6 +186,21 @@ Second run on the same day, with the `local,demo` profiles, a failing receiver p
 
 One request reached the receiver on `/ok` with a 4-byte body that the test did not send. It is probably a probe from the tunnel edge; it was not investigated.
 
+Third run, on `develop` at `ed41543` (the code this branch is based on), with the same profiles and receiver:
+
+| Step | Result |
+|---|---|
+| `./gradlew test` | 446 tests, 0 failures, 0 errors |
+| Success and failing subscriptions, same event | `201`, `201`, event `202` |
+| Success subscription | Delivered; signature verified; `completed` |
+| Failing subscription | Five attempts; ends `failed` |
+| Host removed from the allowlist, new event | Both notifications `failed` after one attempt, `invalid_destination` |
+| Replay of the `invalid_destination` notification, host restored | Round 2; `completed` with `200` |
+| Changed body byte | Signature rejected |
+| 110 requests to `GET /subscriptions` in one minute | 100 × `200`, then 10 × `429` |
+
+The first run of this branch on the older base had shown the same behaviour. This run is the one that matches the code on `develop`.
+
 Not exercised: ngrok (not installed on the test machine), the public-address rule against real DNS, and the exact timestamps of the fourth and fifth attempts (only their count was measured).
 
 ## What this runbook does not cover
