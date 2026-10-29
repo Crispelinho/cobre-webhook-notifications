@@ -10,13 +10,49 @@ groups:
     interval: 10s
     rules:
       - uid: cobre-failed-rate
-        title: Failed delivery rate above 5%
+        title: Permanent delivery failure rate above 5%
         condition: C
         for: 1m
         noDataState: OK
         execErrState: Error
         annotations:
-          summary: More than 5% of delivery attempts did not succeed in the last 5 minutes.
+          summary: More than 5% of delivery attempts failed permanently in the last 5 minutes (retries not counted).
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                sum(rate(notification_delivery_attempts_total{outcome="permanent"}[5m]))
+                / sum(rate(notification_delivery_attempts_total[5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings: { mode: dropNN }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+      - uid: cobre-attempt-failure-rate
+        title: Attempt failure rate including retries above 5%
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: More than 5% of delivery attempts did not succeed in the last 5 minutes, retries included.
         labels:
           severity: warning
         data:
