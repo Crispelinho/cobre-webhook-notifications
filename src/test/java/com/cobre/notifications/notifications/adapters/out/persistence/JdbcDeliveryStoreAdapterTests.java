@@ -79,6 +79,19 @@ class JdbcDeliveryStoreAdapterTests {
 	}
 
 	@Test
+	void findCarriesTheSubscriptionIdAndTheStoredSecretCiphertextUntouched() {
+		assertThat(store.find("N1").orElseThrow().subscriptionId()).isEqualTo("S1");
+		assertThat(store.find("N1").orElseThrow().secretCiphertext()).isNull();
+
+		byte[] ciphertext = { 1, 2, 3, 4 };
+		jdbc.sql("UPDATE subscriptions SET secret_ciphertext = :secret WHERE id = 'S1'")
+			.param("secret", ciphertext)
+			.update();
+
+		assertThat(store.find("N1").orElseThrow().secretCiphertext()).containsExactly(ciphertext);
+	}
+
+	@Test
 	void recordingAnAttemptStoresTheRowAndTheNewStateTogether() {
 		Delivery before = store.find("N1").orElseThrow();
 		AttemptResult result = AttemptResult.response(T0, 200, 42);

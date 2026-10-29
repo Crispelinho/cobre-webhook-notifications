@@ -9,15 +9,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -41,8 +48,11 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.kafka.KafkaContainer;
 
+import com.cobre.notifications.shared.crypto.SecretCipher;
 import com.cobre.notifications.support.WebhookTestServer;
+import com.github.tomakehurst.wiremock.http.Request;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
+import com.github.tomakehurst.wiremock.matching.MatchResult;
 
 /**
  * Delivery end to end against real PostgreSQL and Kafka and a WireMock receiver over HTTPS: ingestion, outbox relay,
@@ -72,6 +82,9 @@ class DeliveryIntegrationTests {
 	private KafkaContainer kafka;
 
 	@Autowired
+	private SecretCipher secretCipher;
+
+	@Autowired
 	private KafkaTemplate<String, String> kafkaTemplate;
 
 	@TestConfiguration(proxyBeanMethods = false)
@@ -79,8 +92,12 @@ class DeliveryIntegrationTests {
 
 		@Bean
 		@Primary
-		HttpClient testWebhookHttpClient() {
-			return WebhookTestServer.trustingHttpClient(Duration.ofSeconds(2));
+		CloseableHttpClient testWebhookHttpClient() {
+			// Destinations must pass the production destination policy (https, port 443, allowlisted public host), so
+			// subscriptions use https://hooks.example.org/... (see FakeDnsConfiguration). The production client connects
+			// to the validated public address; this test client redirects that socket to the local TLS receiver, still
+			// verifying the certificate and the host name.
+			return WebhookTestServer.trustingHttpClient(receiver::getHttpsPort);
 		}
 
 	}
@@ -170,7 +187,7 @@ class DeliveryIntegrationTests {
 	@Test
 	void aRedirectIsAPermanentFailureAndIsNotFollowed() throws Exception {
 		receiver.stubFor(post("/moved").willReturn(aResponse().withStatus(302)
-			.withHeader("Location", "https://localhost:" + receiver.getHttpsPort() + "/elsewhere")));
+			.withHeader("Location", "https://hooks.example.org/elsewhere")));
 		receiver.stubFor(post("/elsewhere").willReturn(aResponse().withStatus(200)));
 
 		String id = ingestFor("/moved");
@@ -247,14 +264,85 @@ class DeliveryIntegrationTests {
 		assertThat(recordsOf("notification.dispatch-retry-0", key)).isEmpty();
 	}
 
+	@Test
+	void aDestinationResolvingToAPrivateAddressFailsPermanentlyWithoutSendingARequest() throws Exception {
+		receiver.stubFor(post("/private").willReturn(aResponse().withStatus(200)));
+
+		String id = ingestFor("https://private.example.org/private", null);
+		awaitStatus(id, "failed");
+		Thread.sleep(1_500);
+
+		assertThat(attempts(id)).singleElement().satisfies(attempt -> {
+			assertThat(attempt.get("http_status")).isNull();
+			assertThat(attempt.get("error_type")).isEqualTo("invalid_destination");
+		});
+		assertThat(notification(id).get("last_error")).isEqualTo("invalid_destination");
+		receiver.verify(0, anyRequestedFor(urlEqualTo("/private")));
+	}
+
+	@Test
+	void theWebhookIsSignedWithTheSubscriptionSecretAndTheReceiverCanVerifyIt() throws Exception {
+		String secret = "whsec_integration-secret";
+		receiver.stubFor(post("/signed").andMatching(request -> MatchResult.of(verifies(request, secret)))
+			.willReturn(aResponse().withStatus(200)));
+		receiver.stubFor(post("/signed").atPriority(10).willReturn(aResponse().withStatus(401)));
+
+		String id = ingestFor("https://hooks.example.org/signed", secret);
+		awaitStatus(id, "completed");
+
+		assertThat(attempts(id)).singleElement().satisfies(attempt -> assertThat(attempt.get("http_status")).isEqualTo(200));
+	}
+
+	@Test
+	void aSignatureMadeWithAnotherSecretIsNeverAccepted() throws Exception {
+		receiver.stubFor(post("/strict").andMatching(request -> MatchResult.of(verifies(request, "whsec_expected")))
+			.willReturn(aResponse().withStatus(200)));
+		receiver.stubFor(post("/strict").atPriority(10).willReturn(aResponse().withStatus(401)));
+
+		String id = ingestFor("https://hooks.example.org/strict", "whsec_someone-else");
+		awaitStatus(id, "failed");
+
+		assertThat(attempts(id)).singleElement().satisfies(attempt -> {
+			assertThat(attempt.get("http_status")).isEqualTo(401);
+			assertThat(attempt.get("error_type")).isEqualTo("http_401");
+		});
+	}
+
+	private static boolean verifies(Request request, String secret) {
+		String header = request.getHeader("Cobre-Signature");
+		if (header == null || !header.matches("t=\\d+,v1=[0-9a-f]{64}")) {
+			return false;
+		}
+		String t = header.substring(2, header.indexOf(','));
+		try {
+			Mac mac = Mac.getInstance("HmacSHA256");
+			mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+			mac.update((t + ".").getBytes(StandardCharsets.UTF_8));
+			return MessageDigest.isEqual(mac.doFinal(request.getBody()),
+					HexFormat.of().parseHex(header.substring(header.indexOf("v1=") + 3)));
+		}
+		catch (GeneralSecurityException ex) {
+			throw new IllegalStateException(ex);
+		}
+	}
+
 	private String ingestFor(String path) throws Exception {
+		return ingestFor("https://hooks.example.org" + path, null);
+	}
+
+	/**
+	 * @param secret plaintext secret to store encrypted for the subscription, or null for an unsigned one
+	 */
+	private String ingestFor(String url, String secret) throws Exception {
 		String client = "C-" + UUID.randomUUID().toString().substring(0, 8);
-		jdbc.sql("INSERT INTO subscriptions (id, client_id, url, event_types, active, created_at) "
-				+ "VALUES (:id, :clientId, :url, :types, true, now())")
-			.param("id", "SUB-" + client)
+		String subscriptionId = "SUB-" + client;
+		jdbc.sql("INSERT INTO subscriptions (id, client_id, url, event_types, active, secret_ciphertext, created_at) "
+				+ "VALUES (:id, :clientId, :url, :types, true, :secret, now())")
+			.param("id", subscriptionId)
 			.param("clientId", client)
-			.param("url", "https://localhost:" + receiver.getHttpsPort() + path)
+			.param("url", url)
 			.param("types", new String[] { "credit_deposit" })
+			.param("secret", secret == null ? null : secretCipher.encrypt(secret.getBytes(StandardCharsets.UTF_8), subscriptionId))
 			.update();
 		String body = "{\"event_id\":\"E-%s\",\"client_id\":\"%s\",\"event_type\":\"credit_deposit\",\"content\":\"x\"}"
 			.formatted(UUID.randomUUID(), client);

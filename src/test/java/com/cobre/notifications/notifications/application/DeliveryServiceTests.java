@@ -91,6 +91,28 @@ class DeliveryServiceTests {
 	}
 
 	@Test
+	void timeoutsAreRetriedButTheFiveAttemptsPerRoundLimitStillApplies() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.failure(NOW, TransportError.TIMEOUT, 10_000);
+
+		for (int attempt = 1; attempt <= 5; attempt++) {
+			// A timeout is retryable and never completes the event, however late the receiver finally answers.
+			assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+			assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+			assertThat(store.attempts).hasSize(attempt);
+		}
+		assertThat(store.attempts).allSatisfy(attempt -> assertThat(attempt.errorType()).isEqualTo("timeout"));
+
+		// The sixth message (a duplicate or the transport's last retry) sends nothing and fails the event.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+
+		assertThat(sent).hasSize(5);
+		assertThat(store.attempts).hasSize(5);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.lastError()).isEqualTo("timeout");
+	}
+
+	@Test
 	void aCompletedEventIsIgnoredWithoutSendingOrRecording() {
 		store.current = delivery(DeliveryStatus.COMPLETED, 1, 1);
 

@@ -40,10 +40,12 @@ class JdbcDeliveryStoreAdapter implements DeliveryStore {
 		return jdbc.sql("""
 				SELECT n.id, n.event_id, e.event_type, e.content, n.destination_url, n.created_at,
 				       n.delivery_status, n.round, n.delivery_date, n.delivered_at, n.last_error, n.version,
+				       n.subscription_id, s.secret_ciphertext,
 				       (SELECT count(*) FROM delivery_attempts a
 				         WHERE a.notification_id = n.id AND a.round = n.round) AS attempts_in_round
 				FROM notifications n
 				JOIN events e ON e.id = n.event_id
+				JOIN subscriptions s ON s.id = n.subscription_id
 				WHERE n.id = :id
 				""")
 			.param("id", notificationEventId)
@@ -108,7 +110,8 @@ class JdbcDeliveryStoreAdapter implements DeliveryStore {
 				rs.getString("event_type"), rs.getString("content"), rs.getString("destination_url"),
 				instant(rs, "created_at"), DeliveryStatus.fromWireValue(rs.getString("delivery_status")),
 				rs.getInt("round"), rs.getInt("attempts_in_round"), instant(rs, "delivery_date"),
-				instant(rs, "delivered_at"), rs.getString("last_error"), rs.getLong("version"));
+				instant(rs, "delivered_at"), rs.getString("last_error"), rs.getLong("version"),
+				rs.getString("subscription_id"), rs.getBytes("secret_ciphertext"));
 	}
 
 	private static Instant instant(ResultSet rs, String column) throws SQLException {
