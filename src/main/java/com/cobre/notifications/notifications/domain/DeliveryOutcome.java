@@ -26,7 +26,7 @@ public enum DeliveryOutcome {
 	public static DeliveryOutcome classify(TransportError error) {
 		return switch (error) {
 			case TIMEOUT, CONNECTION -> RETRYABLE;
-			case TLS, INVALID_DESTINATION -> PERMANENT;
+			case TLS, INVALID_DESTINATION, SIGNING_ERROR -> PERMANENT;
 		};
 	}
 

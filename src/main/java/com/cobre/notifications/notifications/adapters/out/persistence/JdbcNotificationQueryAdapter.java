@@ -34,7 +34,7 @@ class JdbcNotificationQueryAdapter implements NotificationQueryPort {
 
 	private static final String SELECT_NOTIFICATION = """
 			SELECT n.id, n.event_id, n.client_id, e.event_type, e.content, n.delivery_status,
-			       n.created_at, n.delivery_date, n.delivered_at
+			       n.created_at, n.delivery_date, n.delivered_at, n.last_error, n.round, n.version
 			FROM notifications n
 			JOIN events e ON e.id = n.event_id
 			""";
@@ -114,7 +114,8 @@ class JdbcNotificationQueryAdapter implements NotificationQueryPort {
 		return new NotificationEvent(new NotificationEventId(rs.getString("id")), rs.getString("event_id"),
 				new ClientId(rs.getString("client_id")), rs.getString("event_type"), rs.getString("content"),
 				DeliveryStatus.fromWireValue(rs.getString("delivery_status")), instant(rs, "created_at"),
-				instant(rs, "delivery_date"), instant(rs, "delivered_at"), attempts);
+				instant(rs, "delivery_date"), instant(rs, "delivered_at"), rs.getString("last_error"), rs.getInt("round"),
+				rs.getLong("version"), attempts);
 	}
 
 	private static Instant instant(ResultSet rs, String column) throws SQLException {

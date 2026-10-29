@@ -22,10 +22,24 @@ import java.util.Objects;
  * @param deliveredAt first successful (2xx) attempt; null if there was none
  * @param lastError code of the last failed attempt; never content or secrets
  * @param version optimistic lock: a state change applies only if the stored version is still this one
+ * @param subscriptionId owner of {@code secretCiphertext}; the associated data needed to decrypt it
+ * @param secretCiphertext the subscription secret exactly as stored (encrypted), or null for an unsigned
+ * subscription. The domain never sees the plaintext: the sender decrypts it for one request and drops it.
  */
 public record Delivery(NotificationEventId id, String eventId, String eventType, String content,
 		String destinationUrl, Instant createdAt, DeliveryStatus status, int round, int attemptsInRound,
-		Instant deliveryDate, Instant deliveredAt, String lastError, long version) {
+		Instant deliveryDate, Instant deliveredAt, String lastError, long version, String subscriptionId,
+		byte[] secretCiphertext) {
+
+	/**
+	 * A delivery without signing material (unsigned subscription).
+	 */
+	public Delivery(NotificationEventId id, String eventId, String eventType, String content, String destinationUrl,
+			Instant createdAt, DeliveryStatus status, int round, int attemptsInRound, Instant deliveryDate,
+			Instant deliveredAt, String lastError, long version) {
+		this(id, eventId, eventType, content, destinationUrl, createdAt, status, round, attemptsInRound,
+				deliveryDate, deliveredAt, lastError, version, null, null);
+	}
 
 	public Delivery {
 		Objects.requireNonNull(id);
@@ -63,12 +77,13 @@ public record Delivery(NotificationEventId id, String eventId, String eventType,
 		return switch (result.outcome()) {
 			case SUCCESS -> new Delivery(id, eventId, eventType, content, destinationUrl, createdAt,
 					DeliveryStatus.COMPLETED, round, attemptsInRound + 1, now,
-					deliveredAt != null ? deliveredAt : result.attemptedAt(), null, version);
+					deliveredAt != null ? deliveredAt : result.attemptedAt(), null, version, subscriptionId, secretCiphertext);
 			case RETRYABLE -> new Delivery(id, eventId, eventType, content, destinationUrl, createdAt,
 					DeliveryStatus.RETRYING, round, attemptsInRound + 1, null, deliveredAt, result.errorType(),
-					version);
+					version, subscriptionId, secretCiphertext);
 			case PERMANENT -> new Delivery(id, eventId, eventType, content, destinationUrl, createdAt,
-					DeliveryStatus.FAILED, round, attemptsInRound + 1, now, deliveredAt, result.errorType(), version);
+					DeliveryStatus.FAILED, round, attemptsInRound + 1, now, deliveredAt, result.errorType(), version,
+					subscriptionId, secretCiphertext);
 		};
 	}
 
@@ -78,7 +93,8 @@ public record Delivery(NotificationEventId id, String eventId, String eventType,
 	public Delivery exhausted(Instant now) {
 		requireOpen();
 		return new Delivery(id, eventId, eventType, content, destinationUrl, createdAt, DeliveryStatus.FAILED, round,
-				attemptsInRound, now, deliveredAt, lastError != null ? lastError : "retries_exhausted", version);
+				attemptsInRound, now, deliveredAt, lastError != null ? lastError : "retries_exhausted", version, subscriptionId,
+				secretCiphertext);
 	}
 
 	private void requireOpen() {

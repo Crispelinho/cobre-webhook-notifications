@@ -34,3 +34,7 @@ INSERT INTO delivery_attempts (notification_id, round, attempt_number, attempted
     ('EVT003', 2, 1, '2024-03-16T08:00:00Z', 500, 'server_error', 80),
     ('EVT003', 1, 2, '2024-03-15T11:20:18Z', 503, 'server_error', 120),
     ('EVT003', 1, 1, '2024-03-15T11:20:08Z', NULL, 'timeout', 5000);
+
+-- EVT003 failed in round 2 after an earlier replay, so its attempts are consistent with a replay that restarts the
+-- attempt numbering: a further replay starts round 3 and cannot collide with these rows.
+UPDATE notifications SET round = 2 WHERE id = 'EVT003';
