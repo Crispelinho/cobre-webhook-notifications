@@ -12,6 +12,8 @@ import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import com.cobre.notifications.shared.crypto.WebhookSecrets;
+
 @TestConfiguration(proxyBeanMethods = false)
 @Import(FakeDnsConfiguration.class)
 class TestcontainersConfiguration {
@@ -49,6 +51,16 @@ class TestcontainersConfiguration {
 		new SecureRandom().nextBytes(bytes);
 		String key = Base64.getEncoder().encodeToString(bytes);
 		return registry -> registry.add("app.webhook.secrets-key", () -> key);
+	}
+
+	/**
+	 * A fresh seed secret per test run, so no secret is committed for tests. Needed by every test that sets
+	 * {@code app.seed.enabled=true}.
+	 */
+	@Bean
+	DynamicPropertyRegistrar seedSecret() {
+		String secret = WebhookSecrets.generate();
+		return registry -> registry.add("app.seed.secret", () -> secret);
 	}
 
 }

@@ -74,6 +74,11 @@ app:
   seed:
     # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
     enabled: false
+    # Development-only webhook secret of the seed subscriptions, from the DEMO_WEBHOOK_SECRET environment variable. No
+    # value lives in the repository and there is no default: with app.seed.enabled=true (local, demo) the seeder fails
+    # startup when it is missing, so a seed subscription is never delivered unsigned. Use a throwaway value, for
+    # example one generated like a real secret (whsec_ prefix); the demo receiver verifies the signature with it.
+    secret: ${DEMO_WEBHOOK_SECRET:}
   webhook:
     # Comma-separated hosts that webhooks may be sent to; an entry starting with "." also allows its subdomains.
     allowed-hosts: ${WEBHOOK_ALLOWED_HOSTS:}

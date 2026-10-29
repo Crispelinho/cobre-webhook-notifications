@@ -5,6 +5,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.matching;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
@@ -444,6 +445,23 @@ class HttpsWebhookSenderTests {
 		assertThat(wrongSecret.httpStatus()).isEqualTo(401);
 		assertThat(wrongSecret.outcome()).isEqualTo(DeliveryOutcome.PERMANENT);
 		assertThat(unsigned.httpStatus()).isEqualTo(401);
+	}
+
+	@Test
+	void aDemoSeedDeliveryCarriesASignatureTheDemoHostCanVerify() {
+		// The seeder encrypts the externally configured secret with the subscription id as associated data.
+		String demoSecret = "whsec_demo-only";
+		byte[] seeded = cipher.encrypt(demoSecret.getBytes(StandardCharsets.UTF_8), "SUB-CLIENT001");
+		Delivery seedDelivery = new Delivery(new NotificationEventId("N1"), "E1", "credit_deposit", "content",
+				url("/demo"), NOW, DeliveryStatus.PENDING, 1, 0, null, null, null, 0, "SUB-CLIENT001", seeded);
+		receiver.stubFor(post("/demo").andMatching(request -> MatchResult.of(verifies(request, demoSecret)))
+			.willReturn(aResponse().withStatus(200)));
+		receiver.stubFor(post("/demo").atPriority(10).willReturn(aResponse().withStatus(401)));
+
+		AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(seedDelivery);
+
+		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.SUCCESS);
+		receiver.verify(1, postRequestedFor(urlEqualTo("/demo")).withHeader("Cobre-Signature", matching("t=[0-9]+,v1=[0-9a-f]{64}")));
 	}
 
 	@Test
