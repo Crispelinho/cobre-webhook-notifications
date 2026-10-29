@@ -42,6 +42,8 @@ public class SecurityConfig {
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers(HttpMethod.GET, "/notification_events", "/notification_events/*")
 				.hasAuthority("SCOPE_notifications:read")
+				.requestMatchers(HttpMethod.POST, "/notification_events/*/replay")
+				.hasAuthority("SCOPE_notifications:replay")
 				.requestMatchers(HttpMethod.GET, "/subscriptions", "/subscriptions/*")
 				.hasAuthority("SCOPE_subscriptions:read")
 				.requestMatchers(HttpMethod.POST, "/subscriptions")

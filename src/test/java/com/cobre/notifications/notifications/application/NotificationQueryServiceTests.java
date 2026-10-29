@@ -46,7 +46,7 @@ class NotificationQueryServiceTests {
 	private static NotificationEvent notification(String id, ClientId clientId) {
 		Instant createdAt = Instant.parse("2024-03-15T09:30:22Z");
 		return new NotificationEvent(new NotificationEventId(id), id, clientId, "credit_transfer", "content",
-				DeliveryStatus.COMPLETED, createdAt, createdAt, createdAt, List.of());
+				DeliveryStatus.COMPLETED, createdAt, createdAt, createdAt, null, 1, 0, List.of());
 	}
 
 	/**
