@@ -55,6 +55,24 @@ cloudflared tunnel --url http://localhost:9000
 
 Copy the public host that the tool prints (for example `abc123.ngrok-free.app`). Use the **host only**: no scheme, no port, no path. The host changes on every run with free plans, so repeat steps 3 to 5 each time you start a tunnel.
 
+### Windows shortcut: `levantar-tunel.bat`
+
+On Windows, `levantar-tunel.bat` in the project root does steps 1, 2 and 3 for you. It opens the receiver (`scripts/receptor-9200.py`, port 9200) and a cloudflared quick tunnel to it, reads the host from the tunnel output, and opens a console with `WEBHOOK_ALLOWED_HOSTS` already set. Run it from the project root:
+
+```powershell
+.\levantar-tunel.bat
+```
+
+Then, in the console it opens, start the service with the profile you use (step 3):
+
+```powershell
+gradlew.bat bootRun
+```
+
+Keep the `Receptor 9200` and `Tunel cloudflared` windows open for the whole test. Closing either one stops the test. A quick tunnel gives a new host on every run, so run the script again if you restart it.
+
+The script uses port 9200 so it does not collide with the port 9000 of the examples above. Use this host in step 3 instead of `abc123.ngrok-free.app`.
+
 ## Step 3: start the service with that host allowed
 
 The `local` profile enables the development JWT issuer and the seed. `WEBHOOK_ALLOWED_HOSTS` overrides the profile default (`webhook.example.com`):
