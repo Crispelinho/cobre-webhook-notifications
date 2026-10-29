@@ -48,6 +48,18 @@ class ReplayNotificationEventUseCaseTests {
 	}
 
 	@Test
+	void aReplayOfAFailedEventWhoseSubscriptionIsNowInactiveIsAccepted() {
+		store.stored = event(OWNER, DeliveryStatus.FAILED, 1);
+
+		Optional<NotificationEvent> result = useCase.replay(OWNER, ID);
+
+		assertThat(result).hasValueSatisfying(replayed -> assertThat(replayed.round()).isEqualTo(2));
+		assertThat(store.started).hasSize(1);
+		assertThat(audit.entries)
+			.containsExactly(new AuditEntry("CLIENT002", "notification_event.replay", "EVT003", AuditOutcome.SUCCESS));
+	}
+
+	@Test
 	void aRejectedReplayOfACompletedEventIsAuditedAsRejected() {
 		store.stored = event(OWNER, DeliveryStatus.COMPLETED, 1);
 

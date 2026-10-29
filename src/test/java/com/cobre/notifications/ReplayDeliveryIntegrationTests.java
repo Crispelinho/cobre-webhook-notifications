@@ -1,6 +1,7 @@
 package com.cobre.notifications;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.matching;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
@@ -9,10 +10,17 @@ import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.junit.jupiter.api.Test;
@@ -30,8 +38,11 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import com.cobre.notifications.shared.crypto.SecretCipher;
 import com.cobre.notifications.support.WebhookTestServer;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
+import com.github.tomakehurst.wiremock.http.Request;
+import com.github.tomakehurst.wiremock.matching.MatchResult;
 
 /**
  * A replayed notification event goes through the real outbox relay, Kafka and the delivery consumer to a WireMock
@@ -53,6 +64,9 @@ class ReplayDeliveryIntegrationTests {
 
 	@Autowired
 	private JdbcClient jdbc;
+
+	@Autowired
+	private SecretCipher secretCipher;
 
 	@TestConfiguration(proxyBeanMethods = false)
 	static class TrustTestCertificate {
@@ -100,10 +114,60 @@ class ReplayDeliveryIntegrationTests {
 		receiver.verify(1, postRequestedFor(urlEqualTo("/replay-me")));
 	}
 
-	private String ingestFor(String client, String path) throws Exception {
-		jdbc.sql("INSERT INTO subscriptions (id, client_id, url, event_types, active, created_at) "
-				+ "VALUES (:id, :clientId, :url, :types, true, now())")
+	@Test
+	void aFailedNotificationEventOfADeactivatedSubscriptionIsReplayedToItsSnapshotAndSignedWithItsSecret()
+			throws Exception {
+		receiver.stubFor(post("/deactivated").willReturn(aResponse().withStatus(400)));
+		String client = "C-" + UUID.randomUUID().toString().substring(0, 8);
+		String id = ingestFor(client, "/deactivated");
+		awaitStatus(id, "failed");
+		// Deactivating stops matching new events; it does not invalidate the notification event that already exists.
+		// The subscription URL then changes, so only the stored snapshot can lead to /deactivated.
+		jdbc.sql("UPDATE subscriptions SET active = false, url = :url WHERE id = :id")
+			.param("url", "https://hooks.example.org/changed")
 			.param("id", "SUB-" + client)
+			.update();
+
+		receiver.resetAll();
+		receiver.stubFor(post("/deactivated").andMatching(request -> MatchResult.of(verifies(request, "whsec_test_default")))
+			.willReturn(aResponse().withStatus(200)));
+		receiver.stubFor(post("/deactivated").atPriority(10).willReturn(aResponse().withStatus(401)));
+		mvc.perform(MockMvcRequestBuilders.post("/notification_events/" + id + "/replay")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + ISSUER.token(client, "notifications:replay")))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.round").value(2));
+
+		awaitStatus(id, "completed");
+
+		assertThat(attempts(id)).extracting(a -> a.get("http_status")).containsExactly(400, 200);
+		receiver.verify(1, postRequestedFor(urlEqualTo("/deactivated")).withHeader("Cobre-Signature",
+				matching("t=[0-9]+,v1=[0-9a-f]{64}")));
+		receiver.verify(0, postRequestedFor(urlEqualTo("/changed")));
+	}
+
+	private static boolean verifies(Request request, String secret) {
+		String header = request.getHeader("Cobre-Signature");
+		if (header == null || !header.matches("t=\\d+,v1=[0-9a-f]{64}")) {
+			return false;
+		}
+		String t = header.substring(2, header.indexOf(','));
+		try {
+			Mac mac = Mac.getInstance("HmacSHA256");
+			mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+			mac.update((t + ".").getBytes(StandardCharsets.UTF_8));
+			return MessageDigest.isEqual(mac.doFinal(request.getBody()),
+					HexFormat.of().parseHex(header.substring(header.indexOf("v1=") + 3)));
+		}
+		catch (GeneralSecurityException ex) {
+			throw new IllegalStateException(ex);
+		}
+	}
+
+	private String ingestFor(String client, String path) throws Exception {
+		jdbc.sql("INSERT INTO subscriptions (id, client_id, url, event_types, active, secret_ciphertext, created_at) "
+				+ "VALUES (:id, :clientId, :url, :types, true, :secret, now())")
+			.param("id", "SUB-" + client)
+			.param("secret", secretCipher.encrypt("whsec_test_default".getBytes(StandardCharsets.UTF_8), "SUB-" + client))
 			.param("clientId", client)
 			.param("url", "https://hooks.example.org" + path)
 			.param("types", new String[] { "credit_deposit" })

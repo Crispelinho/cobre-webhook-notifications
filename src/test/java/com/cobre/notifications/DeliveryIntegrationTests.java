@@ -327,11 +327,11 @@ class DeliveryIntegrationTests {
 	}
 
 	private String ingestFor(String path) throws Exception {
-		return ingestFor("https://hooks.example.org" + path, null);
+		return ingestFor("https://hooks.example.org" + path, "whsec_test_default");
 	}
 
 	/**
-	 * @param secret plaintext secret to store encrypted for the subscription, or null for an unsigned one
+	 * @param secret plaintext secret to store encrypted for the subscription, (a subscription without a secret is never delivered)
 	 */
 	private String ingestFor(String url, String secret) throws Exception {
 		String client = "C-" + UUID.randomUUID().toString().substring(0, 8);

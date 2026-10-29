@@ -105,6 +105,8 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 			return exhaust(lease, delivery) ? DeliveryResult.FAILED : DeliveryResult.IGNORED;
 		}
 
+		// D67: deactivating a subscription never turns an accepted notification into a failure, so there is no
+		// inactivity check here. The sender still validates the destination, requires the secret and signs every attempt.
 		AttemptResult result = sender.send(delivery);
 		Delivery after = delivery.afterAttempt(result, clock.instant());
 		DeliveryAttempt attempt = new DeliveryAttempt(delivery.round(), delivery.nextAttemptNumber(),
