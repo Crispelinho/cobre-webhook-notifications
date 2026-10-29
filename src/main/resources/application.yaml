@@ -1,3 +1,7 @@
+server:
+  # Overridden with SERVER_PORT when 8081 is taken (see docs/process/local-https-delivery-runbook.md).
+  port: ${SERVER_PORT:8081}
+
 spring:
   application:
     name: notification-service
