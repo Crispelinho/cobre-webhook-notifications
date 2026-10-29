@@ -4,6 +4,11 @@ app:
       # Created by ./gradlew devToken; must match DevTokenTool.ISSUER.
       public-key-location: file:.local/dev-jwt/public.pem
       issuer: cobre-notifications-dev
+  delivery:
+    retry:
+      # Shorter delays so a failed delivery ends in about four minutes. Without them the production schedule needs
+      # about 42 minutes to exhaust five attempts.
+      delays: PT10S,PT30S,PT1M,PT2M
   seed:
     enabled: true
   webhook:

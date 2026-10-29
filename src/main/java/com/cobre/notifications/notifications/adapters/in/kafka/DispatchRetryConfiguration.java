@@ -19,10 +19,10 @@ import org.springframework.util.backoff.BackOffExecution;
  * Non-blocking retries for {@value DispatchConsumer#TOPIC}: one retry topic per backoff step
  * ({@code notification.dispatch-retry-0}, {@code -1}, ...) and the dead-letter topic
  * {@code notification.dispatch-dlt}. This is the programmatic form of {@code @RetryableTopic}; it is used because the
- * demo schedule (10 s, 30 s, 1 min, 2 min) is not exponential and the schedule must change per profile.
+ * local schedule (10 s, 30 s, 1 min, 2 min) is not exponential and the schedule must change per profile.
  *
  * <p>
- * Schedule: if {@code app.delivery.retry.delays} is set (the {@code demo} profile does), those delays are used;
+ * Schedule: if {@code app.delivery.retry.delays} is set (the {@code local} profile does), those delays are used;
  * otherwise the default exponential backoff. A retry topic has one fixed delay, so the jitter of the exponential
  * schedule is drawn once per topic when the application starts, not per message.
  */

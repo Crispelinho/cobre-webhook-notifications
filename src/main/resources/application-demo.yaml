@@ -1,6 +1,0 @@
-# Demo profile: failed deliveries are retried quickly enough to watch (first attempt right away, then after
-# 10 s, 30 s, 1 min and 2 min). Activate with SPRING_PROFILES_ACTIVE=demo (combine with local: local,demo).
-app:
-  delivery:
-    retry:
-      delays: PT10S,PT30S,PT1M,PT2M
