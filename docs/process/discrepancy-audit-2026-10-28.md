@@ -89,5 +89,5 @@ New findings from the same pass:
 - **N2:** rate limit per instance. Documented in D29 and the security analysis.
 - **N3:** migrations V3 to V5 are reserved and unused. Documented in D46.
 - **N4:** same as 7.
-- **N5 (open, needs a decision):** delivery does not check `subscriptions.active`. A notification created before a deactivation is still delivered, and a replay of it is still sent. The code joins `subscriptions` only to read the secret.
+- **N5 (decided as D54; implementation waits for the recovery branch):** delivery does not check `subscriptions.active`. A notification created before a deactivation is still delivered, and a replay of it is still sent. The code joins `subscriptions` only to read the secret.
 - **N6 (open):** three merged changes (`add-event-ingestion-and-delivery`, `add-notification-replay`, `add-observability-and-audit`) are not archived into `openspec/specs/`.
