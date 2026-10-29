@@ -15,8 +15,10 @@ A receiver on `localhost`, `127.0.0.1` or a private address fails the last rule,
 
 ## Prerequisites
 
+- JDK 25, with `JAVA_HOME` pointing to it (the Gradle toolchain requires it).
 - Docker running (the app starts PostgreSQL and Kafka through `compose.yaml`).
-- A tunnel client: [ngrok](https://ngrok.com/) or [cloudflared](https://github.com/cloudflare/cloudflared), either one.
+- A tunnel client: [ngrok](https://ngrok.com/) or [cloudflared](https://github.com/cloudflare/cloudflared), either one. The steps below were verified with `cloudflared tunnel --url`, which needs no account.
+- Free ports. The examples use `8081` for the service (the default in `application.yaml`) and `9000` for the receiver. If `8081` is taken, set `SERVER_PORT` to another value and use it in the `curl` commands.
 - Two development tokens, both signed with `./gradlew devToken`:
 
   ```bash
@@ -68,6 +70,18 @@ Prefix an entry with `.` only if you want its subdomains too: `.ngrok-free.app` 
 
 To see retries quickly, add `SPRING_PROFILES_ACTIVE=local,demo`. The `demo` profile uses the delays `PT10S,PT30S,PT1M,PT2M` instead of the 30 s to 1 h backoff.
 
+If `docker compose` cannot bind the fixed host ports (`9092` for Kafka, `5432` for PostgreSQL), another Compose stack already holds them. This happens when two checkouts run the stack at the same time. Do not stop the other stack; start your own containers on free ports and point the app at them:
+
+```bash
+SPRING_DOCKER_COMPOSE_ENABLED=false
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:15432/notifications
+SPRING_DATASOURCE_USERNAME=notifications
+SPRING_DATASOURCE_PASSWORD=notifications
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092
+```
+
+For Kafka, the container must advertise the port you publish (`KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:19092`); otherwise the client connects to the advertised port and fails.
+
 ## Step 4: create a subscription
 
 The signing secret is returned **once**, in this response. Save it.
@@ -111,7 +125,7 @@ Check the state of the delivery with the notifications API (`GET /notification_e
   }
   ```
 
-A `2xx` status marks the delivery as completed. Any other status, or a timeout, is retried: five attempts per round, then the next round.
+A `2xx` status marks the delivery as completed. Any other status, or a timeout, is retried. A round has five attempts (the first one included). With the `demo` profile the scheduled delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts; the first three attempts were measured at +0 s, +11 s and +42 s. When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
 
 ## Verifying the signature
 
@@ -132,11 +146,46 @@ Compare with a constant-time function. Reject the request if `t` is more than a 
 | Symptom | Likely cause | Check |
 |---|---|---|
 | `POST /subscriptions` returns 400 with `url is not an allowed destination` | A rule of the destination policy failed. The API message is deliberately generic | The reason is only in the application log (`Subscription destination rejected: <reason>`). The reasons are: `only https is allowed`, `only port 443 is allowed`, `host is not in the allowlist`, `host does not resolve`, `host resolves to a non-public address`. |
-| Delivery ends in `INVALID_DESTINATION` | The host was valid when the subscription was created but not when the webhook was sent (the tunnel changed or `WEBHOOK_ALLOWED_HOSTS` does not contain the current host) | Restart the service with the current host, then update the subscription URL. |
+| Delivery ends in `INVALID_DESTINATION` (one attempt, no retries) | The host was valid when the subscription was created but not when the webhook was sent, because `WEBHOOK_ALLOWED_HOSTS` no longer contains it | Put the host back in `WEBHOOK_ALLOWED_HOSTS`, restart, and replay the notification. The replay keeps the URL stored with the notification, so the subscription does not change. |
+| The tunnel host changed and the old subscription URL is dead | A subscription's URL cannot be changed: `PATCH` accepts only `active` and `event_types` | Create a new subscription with the new host. Deactivate or delete the old one. |
 | Seed subscriptions fail with `INVALID_DESTINATION` | `webhook.example.com` does not resolve | Expected. The seed is for the data model, not for live delivery. |
 | Receiver gets no request | The tunnel is not forwarding to port 9000, or the subscription URL has a different host | Open the tunnel's inspector page and check the request log. |
 | Signature check fails | The body was parsed and re-serialized before checking, or the secret is not the one returned on creation | Hash the raw bytes. The secret cannot be recovered: create a new subscription if you lost it. |
-| Startup fails at Kafka (port 9092 already allocated) | Containers left by earlier Testcontainers runs still hold the port | `docker ps` and remove the leftover containers, or run with `SPRING_DOCKER_COMPOSE_ENABLED=false` against your own broker. |
+| Startup fails with `Bind for 0.0.0.0:9092 failed: port is already allocated` | Another Compose stack (for example, the main checkout's) or leftover Testcontainers containers hold the port | Do not stop another project's stack. Use the dedicated containers in [Step 3](#step-3-start-the-service-with-that-host-allowed). Check with `docker ps`. |
+| `Port 8081 was already in use` | Another local app runs on the port | Set `SERVER_PORT` to a free port. |
+| Receiver gets a rejection for `127.0.0.1` with `host is not in the allowlist` | The allowlist check runs before the public-address check, so a loopback host fails on the allowlist first | Expected. The public-address rule is only reached for an allowlisted host. It is covered by the unit tests with a fake resolver (`DestinationPolicyTests`), not by this manual run. |
+
+## Verified run
+
+Run on 2026-10-29 with `cloudflared` (quick tunnel), the `local` profile on port 8090 (8081 was taken), and the dedicated containers from the previous section:
+
+| Step | Result |
+|---|---|
+| Public HTTPS POST reaches the local receiver | Received, `/cobre` |
+| `POST /subscriptions` with an allowlisted `https://<tunnel>/cobre` URL | `201`, secret returned once |
+| `POST /events` with the producer token | `202`, one notification created |
+| Webhook delivery | Received; `Cobre-Signature` verified with the algorithm above; body matches the documented fields |
+| Notification state in `GET /notification_events` | `completed` |
+| Port 8443 on the tunnel host | `400`, generic message; reason `only port 443 is allowed` in the log |
+| Host not in the allowlist | `400`, generic message; reason `host is not in the allowlist` in the log |
+| `https://127.0.0.1/...` | `400`, generic message; reason `host is not in the allowlist` in the log |
+
+Second run on the same day, with the `local,demo` profiles, a failing receiver path (`/fail` answers `500`) and a second tunnel:
+
+| Step | Result |
+|---|---|
+| Success subscription and failing subscription, same event | `201` and `201`; event `202` |
+| Success subscription | `completed` on the first attempt |
+| Failing subscription | Five attempts; the first three at +0 s, +11 s and +42 s (measured). The last two were all received before the run ended; the notification ends `failed` |
+| Allowlist without the tunnel host, then a new event | Both notifications `failed` after one attempt with `invalid_destination`; the log says `host is not in the allowlist` |
+| Replay of the `invalid_destination` notification, with the host back in the allowlist | New round; `completed` with `200`; the receiver got the same `notification_event_id` |
+| Signature check with one byte of the body changed | Rejected; the genuine body still verifies |
+| `./gradlew test` on this branch | 413 tests, 0 failures, 0 errors |
+| CI on this PR | `Build and test`, `Dependency review` and `Validate OpenSpec` pass |
+
+One request reached the receiver on `/ok` with a 4-byte body that the test did not send. It is probably a probe from the tunnel edge; it was not investigated.
+
+Not exercised: ngrok (not installed on the test machine), the public-address rule against real DNS, and the exact timestamps of the fourth and fifth attempts (only their count was measured).
 
 ## What this runbook does not cover
 
