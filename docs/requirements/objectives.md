@@ -32,9 +32,9 @@ The presentation was due three days after the start, with two days left when the
 
 | Priority | Items |
 |---|---|
-| **Must** | The three self-service endpoints with filters and replay. JWT client isolation. `POST /events`. HTTPS delivery with retries and stored final state. Kafka with transactional outbox and dead-letter topic. Basic SSRF protection (HTTPS only, allowlist, private IP blocking, no redirects). Tests for three OWASP risks. C4 diagrams and decisions. README. AI usage log. |
-| **Should** | HMAC webhook signatures. Subscription `POST`, `GET` and `DELETE`. Metrics and a Grafana dashboard. Structured audit log. |
-| **Could** | Subscription `PATCH`. AES-GCM encryption of webhook secrets. End-to-end tracing. DNS pinning against rebinding. Per-client rate limiting (Bucket4j). |
+| **Must** | The three self-service endpoints with filters and replay. JWT client isolation. `POST /events`. HTTPS delivery with HMAC-signed requests, retries and stored final state. Kafka with transactional outbox and dead-letter topic. Basic SSRF protection (HTTPS only, allowlist, private IP blocking, IP pinning against DNS rebinding, no redirects). Tests for three OWASP risks. C4 diagrams and decisions. README. AI usage log. |
+| **Should** | Subscription `POST`, `GET` and `DELETE`. Metrics and a Grafana dashboard. Structured audit log. |
+| **Could** | Subscription `PATCH`. AES-GCM encryption of webhook secrets. End-to-end tracing. Per-client rate limiting (Bucket4j). |
 | **Won't** | Debezium. Cloud deployment. Secret rotation. |
 
 **Fallback plan:** if Kafka retries and the dead-letter topic do not work by midday of day 1, the dispatch queue switches to a PostgreSQL-backed adapter behind the same output port. The domain does not change.
