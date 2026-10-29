@@ -9,6 +9,7 @@ import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import com.cobre.notifications.shared.crypto.SecretCipher;
 import com.cobre.notifications.support.WebhookTestServer;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 
@@ -53,6 +55,9 @@ class ReplayDeliveryIntegrationTests {
 
 	@Autowired
 	private JdbcClient jdbc;
+
+	@Autowired
+	private SecretCipher secretCipher;
 
 	@TestConfiguration(proxyBeanMethods = false)
 	static class TrustTestCertificate {
@@ -101,9 +106,10 @@ class ReplayDeliveryIntegrationTests {
 	}
 
 	private String ingestFor(String client, String path) throws Exception {
-		jdbc.sql("INSERT INTO subscriptions (id, client_id, url, event_types, active, created_at) "
-				+ "VALUES (:id, :clientId, :url, :types, true, now())")
+		jdbc.sql("INSERT INTO subscriptions (id, client_id, url, event_types, active, secret_ciphertext, created_at) "
+				+ "VALUES (:id, :clientId, :url, :types, true, :secret, now())")
 			.param("id", "SUB-" + client)
+			.param("secret", secretCipher.encrypt("whsec_test_default".getBytes(StandardCharsets.UTF_8), "SUB-" + client))
 			.param("clientId", client)
 			.param("url", "https://hooks.example.org" + path)
 			.param("types", new String[] { "credit_deposit" })

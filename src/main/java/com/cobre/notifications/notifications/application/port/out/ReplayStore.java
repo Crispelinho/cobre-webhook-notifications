@@ -16,6 +16,11 @@ public interface ReplayStore {
 	Optional<NotificationEvent> findById(ClientId clientId, NotificationEventId id);
 
 	/**
+	 * Reads the {@code active} flag of the subscription of this notification event from the database.
+	 */
+	boolean isSubscriptionActive(ClientId clientId, NotificationEventId id);
+
+	/**
 	 * Stores the new round and its outbox row in one transaction, conditional on the version and the {@code failed}
 	 * status of {@code before}.
 	 *

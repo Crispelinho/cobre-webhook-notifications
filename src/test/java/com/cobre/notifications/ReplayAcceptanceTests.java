@@ -114,6 +114,29 @@ class ReplayAcceptanceTests {
 		}
 
 		@Test
+		void aReplayOfAnInactiveSubscriptionIsRefusedWith409AndStartsNoRound() throws Exception {
+			String subscriptionId = jdbc.sql("SELECT subscription_id FROM notifications WHERE id = 'EVT009'")
+				.query(String.class)
+				.single();
+			Integer roundBefore = jdbc.sql("SELECT round FROM notifications WHERE id = 'EVT009'")
+				.query(Integer.class)
+				.single();
+			jdbc.sql("UPDATE subscriptions SET active = false WHERE id = :id").param("id", subscriptionId).update();
+			try {
+				mvc.perform(replayAs("CLIENT003", "EVT009"))
+					.andExpect(status().isConflict())
+					.andExpect(jsonPath("$.detail").value("The subscription is inactive; activate it before replaying."));
+			}
+			finally {
+				jdbc.sql("UPDATE subscriptions SET active = true WHERE id = :id").param("id", subscriptionId).update();
+			}
+
+			assertThat(jdbc.sql("SELECT round FROM notifications WHERE id = 'EVT009'")
+				.query(Integer.class)
+				.single()).isEqualTo(roundBefore);
+		}
+
+		@Test
 		void aNotificationEventOfAnotherClientIsNotFoundWithTheSameBodyAsAMissingOne() throws Exception {
 			String other = mvc.perform(replayAs("CLIENT001", "EVT005"))
 				.andExpect(status().isNotFound())

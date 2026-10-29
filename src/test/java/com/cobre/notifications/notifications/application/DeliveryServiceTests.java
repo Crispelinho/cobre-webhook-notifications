@@ -70,6 +70,49 @@ class DeliveryServiceTests {
 	}
 
 	@Test
+	void anInactiveSubscriptionAtSendTimeSendsNothingAndEndsFailedWithoutRetry() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.subscriptionActive = false;
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.lastError()).isEqualTo("subscription_inactive");
+		assertThat(store.attempts).singleElement().satisfies(attempt -> {
+			assertThat(attempt.httpStatus()).isNull();
+			assertThat(attempt.errorType()).isEqualTo("subscription_inactive");
+		});
+	}
+
+	@Test
+	void reactivatingTheSubscriptionDoesNotResendACancelledNotification() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.subscriptionActive = false;
+		service.deliver(new DispatchMessage("N1", 1));
+		store.subscriptionActive = true;
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.attempts).hasSize(1);
+	}
+
+	@Test
+	void aCompletedNotificationKeepsItsSuccessWhenTheSubscriptionIsLaterInactive() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		service.deliver(new DispatchMessage("N1", 1));
+		store.subscriptionActive = false;
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).hasSize(1);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+		assertThat(store.current.lastError()).isNull();
+	}
+
+	@Test
 	void aPermanentFailureIsRecordedAndStops() {
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
 		nextResult = AttemptResult.response(NOW, 404, 20);
@@ -325,6 +368,8 @@ class DeliveryServiceTests {
 
 		private boolean rejectNextWrite;
 
+		private boolean subscriptionActive = true;
+
 		private boolean heldByAnotherWorker;
 
 		private long generation;
@@ -347,6 +392,11 @@ class DeliveryServiceTests {
 			}
 			claims++;
 			return Optional.of(new Lease(owner, ++generation));
+		}
+
+		@Override
+		public boolean isSubscriptionActive(String notificationEventId) {
+			return subscriptionActive;
 		}
 
 		@Override

@@ -130,13 +130,15 @@ class HttpsWebhookSender implements WebhookSender {
 		request.setHeader("Content-Type", "application/json");
 		request.setHeader("Cobre-Notification-Id", delivery.id().value());
 		request.setEntity(new ByteArrayEntity(body, null));
-		if (delivery.secretCiphertext() != null) {
-			String signature = sign(delivery, attemptedAt, body);
-			if (signature == null) {
-				return AttemptResult.failure(attemptedAt, TransportError.SIGNING_ERROR, elapsedMs(started));
-			}
-			request.setHeader(WebhookSigner.SIGNATURE_HEADER, signature);
+		if (delivery.secretCiphertext() == null) {
+			// A subscription without a secret is never delivered unsigned.
+			return AttemptResult.failure(attemptedAt, TransportError.MISSING_SECRET, elapsedMs(started));
 		}
+		String signature = sign(delivery, attemptedAt, body);
+		if (signature == null) {
+			return AttemptResult.failure(attemptedAt, TransportError.SIGNING_ERROR, elapsedMs(started));
+		}
+		request.setHeader(WebhookSigner.SIGNATURE_HEADER, signature);
 		// The total deadline of this attempt: connect, TLS, sending and receiving the status line. Apache's own timeouts
 		// are per operation (a receiver that sends one byte every few seconds never trips them), so a watchdog aborts
 		// the request, which closes its socket and releases the connection, when the whole budget is spent.

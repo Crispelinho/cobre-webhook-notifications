@@ -465,13 +465,15 @@ class HttpsWebhookSenderTests {
 	}
 
 	@Test
-	void aSubscriptionWithoutASecretIsSentUnsigned() {
+	void aSubscriptionWithoutASecretFailsAsPermanentAndNothingIsSent() {
 		receiver.stubFor(post("/plain").willReturn(aResponse().withStatus(200)));
 
-		AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(delivery(url("/plain")));
+		AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(unsignedDelivery(url("/plain")));
 
-		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.SUCCESS);
-		receiver.verify(1, postRequestedFor(urlEqualTo("/plain")).withHeader("Cobre-Signature", absent()));
+		assertThat(result.error()).isEqualTo(TransportError.MISSING_SECRET);
+		assertThat(result.errorType()).isEqualTo("missing_secret");
+		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.PERMANENT);
+		assertThat(receiver.getAllServeEvents()).isEmpty();
 	}
 
 	@Test
@@ -518,7 +520,12 @@ class HttpsWebhookSenderTests {
 		return "https://hooks.example.org" + path;
 	}
 
-	private static Delivery delivery(String destination) {
+	/** A signed delivery with a default secret; a delivery without a secret is never sent. */
+	private Delivery delivery(String destination) {
+		return delivery(destination, "whsec_default");
+	}
+
+	private static Delivery unsignedDelivery(String destination) {
 		return new Delivery(new NotificationEventId("N1"), "E1", "credit_deposit", "Deposit of $10 \"received\"",
 				destination, NOW, DeliveryStatus.PENDING, 1, 0, null, null, null, 0);
 	}

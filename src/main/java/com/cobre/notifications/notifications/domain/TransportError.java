@@ -8,7 +8,11 @@ public enum TransportError {
 
 	TIMEOUT("timeout"), CONNECTION("connection_error"), TLS("tls_error"), INVALID_DESTINATION("invalid_destination"),
 	/** The subscription secret could not be decrypted, so the request cannot be signed and is never sent. */
-	SIGNING_ERROR("signing_error");
+	SIGNING_ERROR("signing_error"),
+	/** The subscription was inactive when the attempt was due: nothing is sent and nothing is retried. */
+	SUBSCRIPTION_INACTIVE("subscription_inactive"),
+	/** The subscription has no secret: an unsigned delivery is never sent. */
+	MISSING_SECRET("missing_secret");
 
 	private final String errorType;
 

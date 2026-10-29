@@ -82,6 +82,20 @@ class JdbcReplayStoreAdapterTests {
 	}
 
 	@Test
+	void aSubscriptionDeactivatedAfterTheCheckMatchesZeroRowsAndStartsNoRound() {
+		NotificationEvent failed = store.findById(CLIENT, ID).orElseThrow();
+		assertThat(store.isSubscriptionActive(CLIENT, ID)).isTrue();
+		// The deactivation lands between the check and the write.
+		jdbc.sql("UPDATE subscriptions SET active = false WHERE id = 'S1'").update();
+
+		boolean started = store.startReplay(failed, failed.replay(), T0);
+
+		assertThat(started).isFalse();
+		assertThat(roundTwoOutboxRows("N1")).isEmpty();
+		assertThat(store.findById(CLIENT, ID).orElseThrow().round()).isEqualTo(1);
+	}
+
+	@Test
 	void theStatusGuardRejectsASnapshotThatIsNotFailedEvenWithTheRightVersion() {
 		NotificationEvent failed = store.findById(CLIENT, ID).orElseThrow();
 		// Bypasses the domain check: a snapshot of the same row and version, but claiming to be completed.

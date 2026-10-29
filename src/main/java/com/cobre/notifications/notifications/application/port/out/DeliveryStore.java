@@ -28,6 +28,12 @@ public interface DeliveryStore {
 	Optional<Lease> claim(Delivery observed, String owner, Instant now, Duration leaseDuration);
 
 	/**
+	 * Reads the {@code active} flag of the subscription of this notification event from the database, at call time.
+	 * It is never taken from the dispatch message.
+	 */
+	boolean isSubscriptionActive(String notificationEventId);
+
+	/**
 	 * Stores the attempt and the resulting state in one transaction, counts the attempt on the notification event and
 	 * releases the lease.
 	 *

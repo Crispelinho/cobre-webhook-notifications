@@ -19,6 +19,7 @@ import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.Lease;
+import com.cobre.notifications.notifications.domain.TransportError;
 
 /**
  * Delivers one notification event per dispatch message. A message for a final notification event or for an earlier
@@ -105,7 +106,10 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 			return exhaust(lease, delivery) ? DeliveryResult.FAILED : DeliveryResult.IGNORED;
 		}
 
-		AttemptResult result = sender.send(delivery);
+		// The state is read from the database for every attempt, never from the message. An inactive subscription ends
+		// the notification as a permanent failure without a request. A deactivation after this read cannot stop it.
+		AttemptResult result = store.isSubscriptionActive(message.notificationEventId()) ? sender.send(delivery)
+				: AttemptResult.failure(clock.instant(), TransportError.SUBSCRIPTION_INACTIVE, 0);
 		Delivery after = delivery.afterAttempt(result, clock.instant());
 		DeliveryAttempt attempt = new DeliveryAttempt(delivery.round(), delivery.nextAttemptNumber(),
 				result.attemptedAt(), result.httpStatus(), result.errorType(), result.latencyMs());

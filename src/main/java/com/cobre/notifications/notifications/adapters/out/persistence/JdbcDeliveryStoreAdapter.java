@@ -186,6 +186,18 @@ class JdbcDeliveryStoreAdapter implements DeliveryStore, LeaseRecoveryStore {
 	}
 
 	@Override
+	public boolean isSubscriptionActive(String notificationEventId) {
+		return jdbc.sql("""
+				SELECT s.active FROM notifications n JOIN subscriptions s ON s.id = n.subscription_id
+				WHERE n.id = :id
+				""")
+			.param("id", notificationEventId)
+			.query(Boolean.class)
+			.optional()
+			.orElse(false);
+	}
+
+	@Override
 	public boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after) {
 		return Boolean.TRUE.equals(transactions.execute(status -> {
 			if (!applyState(lease, before, after, 1)) {

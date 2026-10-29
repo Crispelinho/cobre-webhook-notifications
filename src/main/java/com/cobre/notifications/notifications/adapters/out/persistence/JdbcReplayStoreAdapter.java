@@ -56,6 +56,19 @@ class JdbcReplayStoreAdapter implements ReplayStore {
 	}
 
 	@Override
+	public boolean isSubscriptionActive(ClientId clientId, NotificationEventId id) {
+		return jdbc.sql("""
+				SELECT s.active FROM notifications n JOIN subscriptions s ON s.id = n.subscription_id
+				WHERE n.client_id = :clientId AND n.id = :id
+				""")
+			.param("clientId", clientId.value())
+			.param("id", id.value())
+			.query(Boolean.class)
+			.optional()
+			.orElse(false);
+	}
+
+	@Override
 	public boolean startReplay(NotificationEvent before, NotificationEvent after, Instant now) {
 		return Boolean.TRUE.equals(transactions.execute(status -> {
 			int updated = jdbc.sql("""
@@ -64,6 +77,7 @@ class JdbcReplayStoreAdapter implements ReplayStore {
 					    version = version + 1
 					WHERE id = :id AND client_id = :clientId AND version = :version AND round = :round
 					  AND delivery_status = 'failed'
+					  AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.id = notifications.subscription_id AND s.active)
 					""")
 				.param("status", after.deliveryStatus().wireValue())
 				.param("newRound", after.round())
