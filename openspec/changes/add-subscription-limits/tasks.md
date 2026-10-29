@@ -8,8 +8,8 @@
 
 - [x] 2.1 Acceptance tests for the 51st active subscription on creation and on reactivation (`409`, `code: SUBSCRIPTION_LIMIT_REACHED`)
 - [x] 2.2 Concurrency test: parallel creations and reactivations at 49 active subscriptions end with exactly 50 active
-- [ ] 2.3 Tests for event type rules (empty, 51 entries, invalid pattern, on creation and on `PATCH`)
-- [ ] 2.4 Tests for the list limit, `PATCH {}`, deleting an inactive subscription and port 8443 rejected
+- [x] 2.3 Tests for event type rules (empty, 51 entries, invalid pattern, on creation and on `PATCH`)
+- [x] 2.4 Tests for the list limit, `PATCH {}`, deleting an inactive subscription and port 8443 rejected
 
 ## 3. Implementation
 

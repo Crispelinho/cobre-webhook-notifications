@@ -20,6 +20,8 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
@@ -147,6 +149,23 @@ class SubscriptionManagementAcceptanceTests {
 		}
 
 		@Test
+		void tooManyEventTypes() throws Exception {
+			mvc.perform(asWriter("SUBTEST_TOO_MANY", post("/subscriptions"),
+					"{\"url\":\"https://hooks.example.org/cobre\",\"event_types\":" + eventTypes(51) + "}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+
+			assertThat(countFor("SUBTEST_TOO_MANY")).isZero();
+		}
+
+		@Test
+		void fiftyEventTypesAreAccepted() throws Exception {
+			mvc.perform(asWriter("SUBTEST_MAX_TYPES", post("/subscriptions"),
+					"{\"url\":\"https://hooks.example.org/cobre\",\"event_types\":" + eventTypes(50) + "}"))
+				.andExpect(status().isCreated());
+		}
+
+		@Test
 		void writeScopeIsRequired() throws Exception {
 			mvc.perform(with(ISSUER.token("SUBTEST_SCOPE", "subscriptions:read"), post("/subscriptions"), VALID_BODY))
 				.andExpect(status().isForbidden());
@@ -174,6 +193,35 @@ class SubscriptionManagementAcceptanceTests {
 				.getContentAsString();
 
 			assertThat(body).doesNotContain("secret").doesNotContain("whsec_");
+		}
+
+		@Test
+		void listLimit() throws Exception {
+			String clientId = "SUBTEST_LIST_LIMIT";
+			// Inactive rows keep the 50 active cap out of the way; item 1 is the newest.
+			jdbc.sql("""
+					INSERT INTO subscriptions (id, client_id, url, event_types, active, created_at)
+					SELECT 'sub-list-limit-' || lpad(n::text, 3, '0'), :clientId, 'https://hooks.example.org/cobre',
+					       ARRAY['credit_deposit'], false, now() - n * interval '1 second'
+					FROM generate_series(1, 120) AS n""").param("clientId", clientId).update();
+
+			String body = mvc.perform(asReader(clientId, get("/subscriptions")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.data.length()").value(100))
+				.andReturn()
+				.getResponse()
+				.getContentAsString();
+
+			List<String> ids = JSON.readTree(body)
+				.get("data")
+				.valueStream()
+				.map(item -> item.get("subscription_id").asString())
+				.toList();
+			assertThat(ids).hasSize(100)
+				.first()
+				.isEqualTo("sub-list-limit-001");
+			assertThat(ids).last().isEqualTo("sub-list-limit-100");
+			assertThat(ids).isSorted();
 		}
 
 		@Test
@@ -247,6 +295,19 @@ class SubscriptionManagementAcceptanceTests {
 		}
 
 		@Test
+		void subscriptionAlreadyInactive() throws Exception {
+			String clientId = "SUBTEST_DELETE_INACTIVE";
+			String id = createdId(clientId);
+			mvc.perform(asWriter(clientId, patch("/subscriptions/" + id), "{\"active\":false}"))
+				.andExpect(status().isOk());
+
+			mvc.perform(asWriter(clientId, delete("/subscriptions/" + id), null)).andExpect(status().isNoContent());
+
+			mvc.perform(asReader(clientId, get("/subscriptions")))
+				.andExpect(jsonPath("$.data[?(@.subscription_id == '" + id + "')].active").value(hasItem(false)));
+		}
+
+		@Test
 		void anotherClientCannotDeactivate() throws Exception {
 			String id = createdId("SUBTEST_DELETE_OWNER");
 
@@ -308,6 +369,33 @@ class SubscriptionManagementAcceptanceTests {
 				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
 
 			mvc.perform(asReader("SUBTEST_PATCH", get("/subscriptions/" + id))).andExpect(jsonPath("$.active").value(true));
+		}
+
+		@ParameterizedTest
+		@ValueSource(strings = { "[\"Credit-Deposit\"]", "[\"credit deposit\"]" })
+		void invalidEventTypeOnPatch(String eventTypes) throws Exception {
+			String id = createdId("SUBTEST_PATCH_TYPES");
+
+			mvc.perform(asWriter("SUBTEST_PATCH_TYPES", patch("/subscriptions/" + id),
+					"{\"event_types\":" + eventTypes + "}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+
+			mvc.perform(asReader("SUBTEST_PATCH_TYPES", get("/subscriptions/" + id)))
+				.andExpect(jsonPath("$.event_types").value(containsInAnyOrder("credit_deposit")));
+		}
+
+		@Test
+		void tooManyEventTypesOnPatch() throws Exception {
+			String id = createdId("SUBTEST_PATCH_TYPES");
+
+			mvc.perform(asWriter("SUBTEST_PATCH_TYPES", patch("/subscriptions/" + id),
+					"{\"event_types\":" + eventTypes(51) + "}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+
+			mvc.perform(asReader("SUBTEST_PATCH_TYPES", get("/subscriptions/" + id)))
+				.andExpect(jsonPath("$.event_types").value(containsInAnyOrder("credit_deposit")));
 		}
 
 		@Test
@@ -442,6 +530,10 @@ class SubscriptionManagementAcceptanceTests {
 		return created(mvc.perform(asWriter(clientId, post("/subscriptions"), VALID_BODY)).andExpect(status().isCreated()))
 			.get("subscription_id")
 			.asString();
+	}
+
+	private static String eventTypes(int count) {
+		return IntStream.range(0, count).mapToObj(i -> "\"type_" + i + "\"").collect(Collectors.joining(",", "[", "]"));
 	}
 
 	private static JsonNode created(ResultActions result) throws Exception {
