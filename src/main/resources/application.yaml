@@ -57,6 +57,14 @@ app:
     http:
       connect-timeout: PT2S
       request-timeout: PT10S
+    lease:
+      # How long a worker's claim on a notification event lasts. Keep it well above the request timeout.
+      duration: PT60S
+      recovery:
+        enabled: true
+        # How often expired leases are released and dispatched again.
+        interval: PT30S
+        batch-size: 100
     retry:
       # Attempts per round, the first one included.
       max-attempts: 5

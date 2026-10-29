@@ -3,6 +3,7 @@ package com.cobre.notifications.notifications.adapters.out.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,7 @@ import com.cobre.notifications.notifications.domain.AttemptResult;
 import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
+import com.cobre.notifications.notifications.domain.Lease;
 
 /**
  * The conditional writes that make dispatch consumption idempotent, against a real PostgreSQL.
@@ -97,7 +99,7 @@ class JdbcDeliveryStoreAdapterTests {
 		AttemptResult result = AttemptResult.response(T0, 200, 42);
 		Delivery after = before.afterAttempt(result, T1);
 
-		assertThat(store.recordAttempt(before, attempt(before, result), after)).isTrue();
+		assertThat(store.recordAttempt(claim(before), before, attempt(before, result), after)).isTrue();
 
 		Delivery stored = store.find("N1").orElseThrow();
 		assertThat(stored.status()).isEqualTo(DeliveryStatus.COMPLETED);
@@ -118,9 +120,10 @@ class JdbcDeliveryStoreAdapterTests {
 		AttemptResult result = AttemptResult.response(T0, 503, 42);
 		Delivery after = before.afterAttempt(result, T1);
 		DeliveryAttempt attempt = attempt(before, result);
+		Lease lease = claim(before);
 
-		assertThat(store.recordAttempt(before, attempt, after)).isTrue();
-		assertThat(store.recordAttempt(before, attempt, after)).isFalse();
+		assertThat(store.recordAttempt(lease, before, attempt, after)).isTrue();
+		assertThat(store.recordAttempt(lease, before, attempt, after)).isFalse();
 
 		assertThat(jdbc.sql("SELECT count(*) FROM delivery_attempts WHERE notification_id = 'N1'")
 			.query(Long.class)
@@ -134,14 +137,15 @@ class JdbcDeliveryStoreAdapterTests {
 	void aFinalNotificationEventTakesNoMoreWrites() {
 		Delivery pending = store.find("N1").orElseThrow();
 		AttemptResult ok = AttemptResult.response(T0, 200, 1);
-		store.recordAttempt(pending, attempt(pending, ok), pending.afterAttempt(ok, T1));
+		store.recordAttempt(claim(pending), pending, attempt(pending, ok), pending.afterAttempt(ok, T1));
 		Delivery completed = store.find("N1").orElseThrow();
 		// Same version as stored, so only the final status can be what rejects the write.
 		Delivery forged = new Delivery(completed.id(), completed.eventId(), completed.eventType(), completed.content(),
 				completed.destinationUrl(), completed.createdAt(), DeliveryStatus.PENDING, completed.round(), 0, null,
 				null, null, completed.version());
 
-		assertThat(store.updateState(forged, forged.exhausted(T1))).isFalse();
+		// A lease that was valid when it was taken; only the final status can be what rejects the write.
+		assertThat(store.updateState(new Lease("w", 1), forged, forged.exhausted(T1))).isFalse();
 
 		assertThat(store.find("N1").orElseThrow().status()).isEqualTo(DeliveryStatus.COMPLETED);
 	}
@@ -149,19 +153,24 @@ class JdbcDeliveryStoreAdapterTests {
 	@Test
 	void aWriteForAnotherRoundIsRejected() {
 		Delivery before = store.find("N1").orElseThrow();
+		Lease lease = claim(before);
 		jdbc.sql("UPDATE notifications SET round = 2 WHERE id = 'N1'").update();
 
-		assertThat(store.updateState(before, before.exhausted(T1))).isFalse();
+		assertThat(store.updateState(lease, before, before.exhausted(T1))).isFalse();
 	}
 
 	@Test
 	void attemptsAreCountedPerRound() {
 		Delivery before = store.find("N1").orElseThrow();
 		AttemptResult failure = AttemptResult.response(T0, 500, 1);
-		store.recordAttempt(before, attempt(before, failure), before.afterAttempt(failure, T1));
+		store.recordAttempt(claim(before), before, attempt(before, failure), before.afterAttempt(failure, T1));
 		jdbc.sql("UPDATE notifications SET round = 2, delivery_status = 'pending' WHERE id = 'N1'").update();
 
 		assertThat(store.find("N1").orElseThrow().attemptsInRound()).isZero();
+	}
+
+	private Lease claim(Delivery delivery) {
+		return store.claim(delivery, "worker", T0, Duration.ofSeconds(60)).orElseThrow();
 	}
 
 	private static DeliveryAttempt attempt(Delivery delivery, AttemptResult result) {
