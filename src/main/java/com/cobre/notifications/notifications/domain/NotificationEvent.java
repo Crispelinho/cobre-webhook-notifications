@@ -1,5 +1,7 @@
 package com.cobre.notifications.notifications.domain;
 
+import com.cobre.notifications.kernel.domain.ClientId;
+
 import java.time.Instant;
 import java.util.List;
 

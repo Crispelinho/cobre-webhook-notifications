@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.cobre.notifications.notifications.application.Page;
 import com.cobre.notifications.notifications.application.PageQuery;
 import com.cobre.notifications.notifications.application.port.out.NotificationQueryPort;
-import com.cobre.notifications.notifications.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.NotificationEvent;

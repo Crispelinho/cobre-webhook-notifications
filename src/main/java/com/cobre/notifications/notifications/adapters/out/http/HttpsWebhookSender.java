@@ -83,14 +83,9 @@ class HttpsWebhookSender implements WebhookSender {
 	private final ScheduledThreadPoolExecutor watchdogs = newWatchdog();
 
 	@Autowired
-	HttpsWebhookSender(CloseableHttpClient webhookHttpClient, JsonMapper json, DestinationPolicy destinationPolicy,
-			SecretCipher secretCipher, WebhookSigner signer,
-			@Value("${app.delivery.http.request-timeout:PT10S}") Duration requestTimeout) {
-		this(webhookHttpClient, json, destinationPolicy, secretCipher, signer, requestTimeout, Clock.systemUTC());
-	}
-
 	HttpsWebhookSender(CloseableHttpClient client, JsonMapper json, DestinationPolicy destinationPolicy,
-			SecretCipher secretCipher, WebhookSigner signer, Duration requestTimeout, Clock clock) {
+			SecretCipher secretCipher, WebhookSigner signer,
+			@Value("${app.delivery.http.request-timeout:PT10S}") Duration requestTimeout, Clock clock) {
 		this.client = client;
 		this.json = json;
 		this.destinationPolicy = destinationPolicy;

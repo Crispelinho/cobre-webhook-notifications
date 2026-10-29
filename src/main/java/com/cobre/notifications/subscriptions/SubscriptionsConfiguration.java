@@ -19,8 +19,8 @@ class SubscriptionsConfiguration {
 
 	@Bean
 	SubscriptionService subscriptionService(SubscriptionRepository subscriptionRepository,
-			DestinationValidator destinationValidator, SecretIssuer secretIssuer, AuditLog auditLog) {
-		return new SubscriptionService(subscriptionRepository, destinationValidator, secretIssuer, Clock.systemUTC(), auditLog);
+			DestinationValidator destinationValidator, SecretIssuer secretIssuer, AuditLog auditLog, Clock clock) {
+		return new SubscriptionService(subscriptionRepository, destinationValidator, secretIssuer, clock, auditLog);
 	}
 
 }

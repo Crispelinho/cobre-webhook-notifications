@@ -15,6 +15,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Nested;
@@ -359,6 +364,78 @@ class SubscriptionManagementAcceptanceTests {
 				.isEqualTo("t=1700000000,v1=8cb2c3355fca388e9ac2caec004f4d5d7045d74937ab5faad61dc11682247a9f");
 		}
 
+	}
+
+	@Test
+	void fiftyFirstActiveSubscriptionIsRefusedWithConflictAndCode() throws Exception {
+		String client = "SUBTEST_LIMIT_CREATE";
+		for (int i = 0; i < 50; i++) {
+			createdId(client);
+		}
+
+		mvc.perform(asWriter(client, post("/subscriptions"), VALID_BODY))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.code").value("SUBSCRIPTION_LIMIT_REACHED"));
+	}
+
+	@Test
+	void reactivationAtTheLimitIsRefusedWithConflictAndCode() throws Exception {
+		String client = "SUBTEST_LIMIT_REACTIVATE";
+		String id = createdId(client);
+		mvc.perform(asWriter(client, patch("/subscriptions/" + id), "{\"active\":false}")).andExpect(status().isOk());
+		for (int i = 0; i < 50; i++) {
+			createdId(client);
+		}
+
+		mvc.perform(asWriter(client, patch("/subscriptions/" + id), "{\"active\":true}"))
+			.andExpect(status().isConflict())
+			.andExpect(jsonPath("$.code").value("SUBSCRIPTION_LIMIT_REACHED"));
+		mvc.perform(asReader(client, get("/subscriptions/" + id))).andExpect(jsonPath("$.active").value(false));
+	}
+
+	@Test
+	void patchingAnActiveSubscriptionAtTheLimitIsNeverRefused() throws Exception {
+		String client = "SUBTEST_LIMIT_PATCH";
+		String id = createdId(client);
+		for (int i = 1; i < 50; i++) {
+			createdId(client);
+		}
+
+		mvc.perform(asWriter(client, patch("/subscriptions/" + id), "{\"active\":true}"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.active").value(true));
+	}
+
+	@Test
+	void concurrentCreationNeverExceedsFiftyActiveSubscriptions() throws Exception {
+		String client = "SUBTEST_LIMIT_CONCURRENT";
+		ExecutorService pool = Executors.newFixedThreadPool(20);
+		try {
+			List<Future<Integer>> statuses = new ArrayList<>();
+			for (int i = 0; i < 60; i++) {
+				statuses.add(pool.submit(() -> mvc.perform(asWriter(client, post("/subscriptions"), VALID_BODY))
+					.andReturn()
+					.getResponse()
+					.getStatus()));
+			}
+			long created = 0;
+			long refused = 0;
+			for (Future<Integer> status : statuses) {
+				int code = status.get();
+				if (code == 201) {
+					created++;
+				}
+				else if (code == 409) {
+					refused++;
+				}
+			}
+			assertThat(created).isEqualTo(50);
+			assertThat(refused).isEqualTo(10);
+		}
+		finally {
+			pool.shutdownNow();
+		}
 	}
 
 	private String createdId(String clientId) throws Exception {
