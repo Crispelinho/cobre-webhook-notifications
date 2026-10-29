@@ -18,6 +18,7 @@ import com.cobre.notifications.events.application.port.out.ActiveSubscriptionsPo
 import com.cobre.notifications.events.application.port.out.EventStorePort;
 import com.cobre.notifications.events.application.port.out.NotificationIdGenerator;
 import com.cobre.notifications.events.domain.Event;
+import com.cobre.notifications.events.domain.EventValidationException;
 import com.cobre.notifications.events.domain.PendingNotification;
 import com.cobre.notifications.events.domain.Subscription;
 
@@ -84,7 +85,7 @@ class IngestEventUseCaseTests {
 	@Test
 	void rejectsAnInvalidEventWithoutStoringAnything() {
 		assertThatThrownBy(() -> useCase.ingest("E1", "", "credit_deposit", "content"))
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(EventValidationException.class);
 
 		assertThat(store.calls).isZero();
 	}

@@ -195,6 +195,15 @@ class EventIngestionAcceptanceTests {
 		}
 
 		@Test
+		void validationFailureKeepsTheProblemJsonShape() throws Exception {
+			ingest(producerToken(), event(uniqueEvent(), "CLIENT001", "Credit-Deposit"))
+				.andExpect(status().isBadRequest())
+				.andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.detail").value("event_type must match ^[a-z0-9_]{1,100}$."));
+		}
+
+		@Test
 		void missingFieldIsRejected() throws Exception {
 			ingest(producerToken(), "{\"event_id\":\"" + uniqueEvent() + "\",\"client_id\":\"C\",\"event_type\":\"t\"}")
 				.andExpect(status().isBadRequest())

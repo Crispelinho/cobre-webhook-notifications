@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.cobre.notifications.events.application.DuplicateEventException;
+import com.cobre.notifications.events.domain.EventValidationException;
 
 /**
  * Fixed texts only: nothing from the request body is reflected into error responses.
@@ -19,9 +20,20 @@ class EventExceptionHandler {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, "An event with this event_id already exists.");
 	}
 
-	@ExceptionHandler(IllegalArgumentException.class)
-	ProblemDetail invalid(IllegalArgumentException ex) {
+	/**
+	 * The only place an exception message reaches the client: event validation messages are fixed texts.
+	 */
+	@ExceptionHandler(EventValidationException.class)
+	ProblemDetail invalid(EventValidationException ex) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+	}
+
+	/**
+	 * Any other illegal argument is an unexpected failure: its message is never reflected to the client.
+	 */
+	@ExceptionHandler(IllegalArgumentException.class)
+	ProblemDetail unexpected() {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected error.");
 	}
 
 	@ExceptionHandler(HttpMessageNotReadableException.class)
