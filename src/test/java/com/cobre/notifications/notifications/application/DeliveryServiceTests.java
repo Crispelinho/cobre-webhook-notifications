@@ -70,25 +70,28 @@ class DeliveryServiceTests {
 	}
 
 	@Test
-	void anInactiveSubscriptionAtSendTimeSendsNothingAndEndsFailedWithoutRetry() {
+	void aPendingFirstRoundDeliveryIsSentEvenIfItsSubscriptionWasDeactivatedAfterItWasAccepted() {
+		// D67: the store has no inactivity gate, so deactivation cannot turn an accepted notification into a failure.
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
-		store.subscriptionActive = false;
 
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
 
-		assertThat(sent).isEmpty();
-		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
-		assertThat(store.current.lastError()).isEqualTo("subscription_inactive");
-		assertThat(store.attempts).singleElement().satisfies(attempt -> {
-			assertThat(attempt.httpStatus()).isNull();
-			assertThat(attempt.errorType()).isEqualTo("subscription_inactive");
-		});
+		assertThat(sent).hasSize(1);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
 	}
 
 	@Test
-	void aReplayOfAnInactiveSubscriptionSkipsOnlyTheInactivityCheckAndSendsTheAttempt() {
+	void aFirstRoundRetryIsSentEvenIfItsSubscriptionWasDeactivated() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 2);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(sent).hasSize(1);
+	}
+
+	@Test
+	void aReplayRoundIsSentLikeAnyOtherDelivery() {
 		store.current = delivery(DeliveryStatus.PENDING, 2, 0);
-		store.subscriptionActive = false;
 
 		assertThat(service.deliver(new DispatchMessage("N1", 2))).isEqualTo(DeliveryResult.DELIVERED);
 
@@ -97,67 +100,43 @@ class DeliveryServiceTests {
 	}
 
 	@Test
-	void aReplayStillStopsWhenTheSenderRefusesIt() {
-		store.current = delivery(DeliveryStatus.PENDING, 2, 0);
-		store.subscriptionActive = false;
+	void aDestinationThatFailsValidationEndsTheDeliveryAndTheReplayAsFailed() {
+		nextResult = AttemptResult.failure(NOW, TransportError.INVALID_DESTINATION, 0);
+		for (int round : new int[] { 1, 2 }) {
+			store.current = delivery(DeliveryStatus.PENDING, round, 0);
+
+			assertThat(service.deliver(new DispatchMessage("N1", round))).isEqualTo(DeliveryResult.FAILED);
+
+			assertThat(store.current.lastError()).isEqualTo("invalid_destination");
+		}
+	}
+
+	@Test
+	void aSubscriptionWithoutASecretEndsTheDeliveryAndTheReplayAsMissingSecret() {
 		nextResult = AttemptResult.failure(NOW, TransportError.MISSING_SECRET, 0);
+		for (int round : new int[] { 1, 2 }) {
+			store.current = delivery(DeliveryStatus.PENDING, round, 0);
 
-		assertThat(service.deliver(new DispatchMessage("N1", 2))).isEqualTo(DeliveryResult.FAILED);
+			assertThat(service.deliver(new DispatchMessage("N1", round))).isEqualTo(DeliveryResult.FAILED);
 
-		assertThat(store.current.lastError()).isEqualTo("missing_secret");
-	}
-
-	@Test
-	void aRetryOfAnInactiveSubscriptionSendsNothing() {
-		store.current = delivery(DeliveryStatus.RETRYING, 1, 2);
-		store.subscriptionActive = false;
-
-		service.deliver(new DispatchMessage("N1", 1));
-
-		assertThat(sent).isEmpty();
-		assertThat(store.current.lastError()).isEqualTo("subscription_inactive");
-	}
-
-	@Test
-	void aRetryOfAReactivatedSubscriptionContinuesAndSends() {
-		store.current = delivery(DeliveryStatus.RETRYING, 1, 2);
-		store.subscriptionActive = true;
-
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
-
-		assertThat(sent).hasSize(1);
+			assertThat(store.current.lastError()).isEqualTo("missing_secret");
+		}
 	}
 
 	@Test
 	void reactivatingTheSubscriptionDoesNotReopenAFailedNotification() {
 		store.current = delivery(DeliveryStatus.FAILED, 1, 5);
-		store.subscriptionActive = true;
 
 		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
 
 		assertThat(sent).isEmpty();
 		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
-	}
-
-	@Test
-	void reactivatingTheSubscriptionDoesNotResendACancelledNotification() {
-		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
-		store.subscriptionActive = false;
-		service.deliver(new DispatchMessage("N1", 1));
-		store.subscriptionActive = true;
-
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
-
-		assertThat(sent).isEmpty();
-		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
-		assertThat(store.attempts).hasSize(1);
 	}
 
 	@Test
 	void aCompletedNotificationKeepsItsSuccessWhenTheSubscriptionIsLaterInactive() {
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
 		service.deliver(new DispatchMessage("N1", 1));
-		store.subscriptionActive = false;
 
 		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
 
@@ -422,8 +401,6 @@ class DeliveryServiceTests {
 
 		private boolean rejectNextWrite;
 
-		private boolean subscriptionActive = true;
-
 		private boolean heldByAnotherWorker;
 
 		private long generation;
@@ -446,11 +423,6 @@ class DeliveryServiceTests {
 			}
 			claims++;
 			return Optional.of(new Lease(owner, ++generation));
-		}
-
-		@Override
-		public boolean isSubscriptionActive(String notificationEventId) {
-			return subscriptionActive;
 		}
 
 		@Override

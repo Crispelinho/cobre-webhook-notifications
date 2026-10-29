@@ -12,9 +12,4 @@ public class NotReplayableException extends RuntimeException {
 	public NotReplayableException() {
 		super(MESSAGE);
 	}
-
-	protected NotReplayableException(String message) {
-		super(message);
-	}
-
 }

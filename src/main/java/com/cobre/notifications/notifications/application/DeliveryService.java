@@ -19,7 +19,6 @@ import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.Lease;
-import com.cobre.notifications.notifications.domain.TransportError;
 
 /**
  * Delivers one notification event per dispatch message. A message for a final notification event or for an earlier
@@ -106,12 +105,9 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 			return exhaust(lease, delivery) ? DeliveryResult.FAILED : DeliveryResult.IGNORED;
 		}
 
-		// The state is read from the database for every attempt, never from the message. An inactive subscription ends
-		// a normal delivery as a permanent failure without a request. A replay (D57) skips only this check: the sender
-		// still validates the destination, requires the secret and signs for every attempt. A deactivation after this
-		// read cannot stop the attempt.
-		AttemptResult result = delivery.isReplay() || store.isSubscriptionActive(message.notificationEventId())
-				? sender.send(delivery) : AttemptResult.failure(clock.instant(), TransportError.SUBSCRIPTION_INACTIVE, 0);
+		// D67: deactivating a subscription never turns an accepted notification into a failure, so there is no
+		// inactivity check here. The sender still validates the destination, requires the secret and signs every attempt.
+		AttemptResult result = sender.send(delivery);
 		Delivery after = delivery.afterAttempt(result, clock.instant());
 		DeliveryAttempt attempt = new DeliveryAttempt(delivery.round(), delivery.nextAttemptNumber(),
 				result.attemptedAt(), result.httpStatus(), result.errorType(), result.latencyMs());
