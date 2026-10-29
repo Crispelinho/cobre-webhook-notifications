@@ -12,12 +12,15 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
+import com.cobre.notifications.audit.application.AuditEntry;
+import com.cobre.notifications.audit.application.AuditOutcome;
 import com.cobre.notifications.notifications.application.port.out.ReplayStore;
 import com.cobre.notifications.notifications.domain.ClientId;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.NotReplayableException;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
+import com.cobre.notifications.support.RecordingAuditLog;
 
 class ReplayNotificationEventUseCaseTests {
 
@@ -29,8 +32,50 @@ class ReplayNotificationEventUseCaseTests {
 
 	private final FakeReplayStore store = new FakeReplayStore();
 
+	private final RecordingAuditLog audit = new RecordingAuditLog();
+
 	private final ReplayNotificationEventUseCase useCase = new ReplayNotificationEventUseCase(store,
-			Clock.fixed(NOW, ZoneOffset.UTC));
+			Clock.fixed(NOW, ZoneOffset.UTC), audit);
+
+	@Test
+	void aReplayIsAuditedOnceWithTheActingClientAndTheResource() {
+		store.stored = event(OWNER, DeliveryStatus.FAILED, 1);
+
+		useCase.replay(OWNER, ID);
+
+		assertThat(audit.entries)
+			.containsExactly(new AuditEntry("CLIENT002", "notification_event.replay", "EVT003", AuditOutcome.SUCCESS));
+	}
+
+	@Test
+	void aRejectedReplayOfACompletedEventIsAuditedAsRejected() {
+		store.stored = event(OWNER, DeliveryStatus.COMPLETED, 1);
+
+		assertThatThrownBy(() -> useCase.replay(OWNER, ID)).isInstanceOf(NotReplayableException.class);
+
+		assertThat(audit.entries)
+			.containsExactly(new AuditEntry("CLIENT002", "notification_event.replay", "EVT003", AuditOutcome.REJECTED));
+	}
+
+	@Test
+	void losingTheReplayRaceIsAuditedAsRejected() {
+		store.stored = event(OWNER, DeliveryStatus.FAILED, 1);
+		store.acceptWrites = false;
+
+		assertThatThrownBy(() -> useCase.replay(OWNER, ID)).isInstanceOf(NotReplayableException.class);
+
+		assertThat(audit.entries).singleElement().extracting(AuditEntry::outcome).isEqualTo(AuditOutcome.REJECTED);
+	}
+
+	@Test
+	void aReplayOfAnEventOfAnotherClientIsAuditedAsNotFound() {
+		store.stored = event(OWNER, DeliveryStatus.FAILED, 1);
+
+		useCase.replay(new ClientId("CLIENT001"), ID);
+
+		assertThat(audit.entries).containsExactly(
+				new AuditEntry("CLIENT001", "notification_event.replay", "EVT003", AuditOutcome.NOT_FOUND));
+	}
 
 	@Test
 	void replaysAFailedEventOfTheClient() {

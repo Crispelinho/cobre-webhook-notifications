@@ -9,12 +9,12 @@ import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,8 +59,8 @@ class ReplayDeliveryIntegrationTests {
 
 		@Bean
 		@Primary
-		HttpClient testWebhookHttpClient() {
-			return WebhookTestServer.trustingHttpClient(Duration.ofSeconds(2));
+		CloseableHttpClient testWebhookHttpClient() {
+			return WebhookTestServer.trustingHttpClient(receiver::getHttpsPort);
 		}
 
 	}
@@ -105,7 +105,7 @@ class ReplayDeliveryIntegrationTests {
 				+ "VALUES (:id, :clientId, :url, :types, true, now())")
 			.param("id", "SUB-" + client)
 			.param("clientId", client)
-			.param("url", "https://localhost:" + receiver.getHttpsPort() + path)
+			.param("url", "https://hooks.example.org" + path)
 			.param("types", new String[] { "credit_deposit" })
 			.update();
 		String body = "{\"event_id\":\"E-%s\",\"client_id\":\"%s\",\"event_type\":\"credit_deposit\",\"content\":\"x\"}"

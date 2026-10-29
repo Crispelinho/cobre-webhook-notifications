@@ -1,5 +1,6 @@
 package com.cobre.notifications.notifications.adapters.in.kafka;
 
+import org.slf4j.MDC;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
@@ -32,8 +33,11 @@ class DispatchConsumer {
 			groupId = "${spring.kafka.consumer.group-id:notification-service}")
 	void onMessage(String payload) {
 		DispatchMessage message = parser.parse(payload);
-		if (delivery.deliver(message) == DeliveryResult.RETRY) {
-			throw new RetryableDeliveryException(message.notificationEventId(), message.round());
+		// Every log line written while this message is handled carries its notification event id.
+		try (MDC.MDCCloseable ignored = MDC.putCloseable(LogKeys.NOTIFICATION_EVENT_ID, message.notificationEventId())) {
+			if (delivery.deliver(message) == DeliveryResult.RETRY) {
+				throw new RetryableDeliveryException(message.notificationEventId(), message.round());
+			}
 		}
 	}
 

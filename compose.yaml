@@ -24,3 +24,8 @@ services:
       - '3000:3000'
       - '4317'
       - '4318'
+    # Dashboard and alert rules are provisioned as files; each mount adds one file to the image's own directories.
+    volumes:
+      - './docker/grafana/provisioning/dashboards/notification-delivery.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/notification-delivery.yaml:ro'
+      - './docker/grafana/provisioning/alerting/notification-delivery-alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/notification-delivery-alerts.yaml:ro'
+      - './docker/grafana/dashboards:/var/lib/cobre/dashboards:ro'

@@ -1,0 +1,151 @@
+apiVersion: 1
+
+# Alert rules for the delivery path (D33). Metric names are the Prometheus form of the OTLP meters in
+# MicrometerDeliveryMetrics and OutboxAgeGauge. Rules are evaluated every 10 s so the dead-letter alert fires well
+# inside one minute. No contact point is provisioned: the demo reads the state in Grafana (Alerting > Alert rules).
+groups:
+  - orgId: 1
+    name: notification-delivery
+    folder: Notification delivery
+    interval: 10s
+    rules:
+      - uid: cobre-failed-rate
+        title: Permanent delivery failure rate above 5%
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: More than 5% of delivery attempts failed permanently in the last 5 minutes (retries not counted).
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                sum(rate(notification_delivery_attempts_total{outcome="permanent"}[5m]))
+                / sum(rate(notification_delivery_attempts_total[5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings: { mode: dropNN }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+      - uid: cobre-attempt-failure-rate
+        title: Attempt failure rate including retries above 5%
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: More than 5% of delivery attempts did not succeed in the last 5 minutes, retries included.
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                sum(rate(notification_delivery_attempts_total{outcome!="success"}[5m]))
+                / sum(rate(notification_delivery_attempts_total[5m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings: { mode: dropNN }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0.05] }
+      - uid: cobre-dead-letter
+        title: Message reached the dead-letter topic
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: A dispatch message exhausted its retries and reached notification.dispatch-dlt.
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: sum(increase(notification_dead_letter_total[2m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings: { mode: dropNN }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+      - uid: cobre-outbox-age
+        title: Oldest unpublished outbox row older than 60 s
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        annotations:
+          summary: The relay is not publishing; events are accumulating in the outbox (Kafka down or relay stopped).
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              instant: true
+              expr: max(notification_outbox_oldest_unpublished_age_seconds)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              settings: { mode: dropNN }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator: { type: gt, params: [60] }
