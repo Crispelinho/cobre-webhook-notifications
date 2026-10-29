@@ -2,19 +2,35 @@ package com.cobre.notifications.notifications.adapters.out.http;
 
 import java.io.IOException;
 import java.net.ConnectException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.net.http.HttpTimeoutException;
+import java.net.InetAddress;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.net.ssl.SSLException;
 
+import jakarta.annotation.PreDestroy;
+
+import org.apache.hc.client5.http.ConnectTimeoutException;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.core5.http.ClassicHttpResponse;
+import org.apache.hc.core5.http.HttpHost;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+import org.apache.hc.core5.io.CloseMode;
+import org.apache.hc.core5.io.ModalCloseable;
+import org.apache.hc.core5.util.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -22,77 +38,221 @@ import com.cobre.notifications.notifications.application.port.out.WebhookSender;
 import com.cobre.notifications.notifications.domain.AttemptResult;
 import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.TransportError;
+import com.cobre.notifications.shared.crypto.SecretCipher;
+import com.cobre.notifications.shared.crypto.WebhookSigner;
+import com.cobre.notifications.shared.security.DestinationPolicy;
+import com.cobre.notifications.shared.security.RejectedDestinationException;
 
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Sends the webhook with the JDK {@link HttpClient}: HTTPS only, redirects never followed (a {@code 3xx} comes back as
- * a plain status) and a hard request timeout. The call blocks, which is cheap on the virtual threads that run the
- * Kafka listeners. Nothing from the request or response is logged: destinations and content stay out of the logs.
+ * Sends the webhook with Apache HttpClient 5: HTTPS only, redirects never followed (a {@code 3xx} comes back as a
+ * plain status) and a hard TOTAL deadline per attempt (see {@link #send}). Before every attempt the destination goes through the shared
+ * {@link DestinationPolicy} (a rejection is an {@code INVALID_DESTINATION} attempt and no request is sent), the
+ * connection goes to the address the policy validated and never to a second DNS answer (see
+ * {@link WebhookHttpClientConfiguration}), and when the subscription has a secret the body is signed with it
+ * ({@code Cobre-Signature}). The call blocks, which is cheap on the virtual threads that run the Kafka listeners.
+ * Nothing from the request or response is logged: destinations and content stay out of the logs.
  */
 @Component
 class HttpsWebhookSender implements WebhookSender {
 
 	private static final Logger log = LoggerFactory.getLogger(HttpsWebhookSender.class);
 
-	private final HttpClient client;
+	/** The destination policy only accepts the default HTTPS port. */
+	private static final int HTTPS_PORT = 443;
+
+	private final CloseableHttpClient client;
 
 	private final JsonMapper json;
 
-	private final Clock clock = Clock.systemUTC();
+	private final DestinationPolicy destinationPolicy;
+
+	private final SecretCipher secretCipher;
+
+	private final WebhookSigner signer;
+
+	private final Clock clock;
 
 	private final Duration requestTimeout;
 
-	HttpsWebhookSender(HttpClient webhookHttpClient, JsonMapper json,
+	/**
+	 * One daemon thread that fires the per-request deadlines. A task only flips a flag and aborts the request, so one
+	 * thread serves any number of concurrent consumers.
+	 */
+	private final ScheduledThreadPoolExecutor watchdogs = newWatchdog();
+
+	@Autowired
+	HttpsWebhookSender(CloseableHttpClient webhookHttpClient, JsonMapper json, DestinationPolicy destinationPolicy,
+			SecretCipher secretCipher, WebhookSigner signer,
 			@Value("${app.delivery.http.request-timeout:PT10S}") Duration requestTimeout) {
-		this.client = webhookHttpClient;
+		this(webhookHttpClient, json, destinationPolicy, secretCipher, signer, requestTimeout, Clock.systemUTC());
+	}
+
+	HttpsWebhookSender(CloseableHttpClient client, JsonMapper json, DestinationPolicy destinationPolicy,
+			SecretCipher secretCipher, WebhookSigner signer, Duration requestTimeout, Clock clock) {
+		this.client = client;
 		this.json = json;
+		this.destinationPolicy = destinationPolicy;
+		this.secretCipher = secretCipher;
+		this.signer = signer;
 		this.requestTimeout = requestTimeout;
+		this.clock = clock;
+	}
+
+	private static ScheduledThreadPoolExecutor newWatchdog() {
+		ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, runnable -> {
+			Thread thread = Executors.defaultThreadFactory().newThread(runnable);
+			thread.setName("webhook-deadline-watchdog");
+			thread.setDaemon(true);
+			return thread;
+		});
+		executor.setRemoveOnCancelPolicy(true);
+		return executor;
+	}
+
+	@PreDestroy
+	void stopWatchdog() {
+		watchdogs.shutdownNow();
 	}
 
 	@Override
 	public AttemptResult send(Delivery delivery) {
 		Instant attemptedAt = clock.instant();
 		long started = System.nanoTime();
-		URI destination = parse(delivery.destinationUrl());
-		if (destination == null || !"https".equalsIgnoreCase(destination.getScheme())
-				|| destination.getHost() == null) {
-			return AttemptResult.failure(attemptedAt, TransportError.INVALID_DESTINATION, 0);
-		}
-		HttpRequest request = HttpRequest.newBuilder(destination)
-			.timeout(requestTimeout)
-			.header("Content-Type", "application/json")
-			.header("Cobre-Notification-Id", delivery.id().value())
-			.POST(HttpRequest.BodyPublishers.ofString(WebhookBody.from(delivery).toJson(json)))
-			.build();
+		DestinationPolicy.Destination destination;
 		try {
-			HttpResponse<Void> response = client.send(request, HttpResponse.BodyHandlers.discarding());
-			return AttemptResult.response(attemptedAt, response.statusCode(), elapsedMs(started));
+			destination = destinationPolicy.check(delivery.destinationUrl());
 		}
-		catch (InterruptedException ex) {
-			Thread.currentThread().interrupt();
-			// The consumer is shutting down: let the message be redelivered rather than record a fake failure.
-			throw new IllegalStateException("Interrupted while sending webhook", ex);
+		catch (RejectedDestinationException ex) {
+			// The reason is fixed text without the URL; the destination itself stays out of the logs.
+			log.warn("Destination of notification event {} rejected: {}", delivery.id().value(), ex.getMessage());
+			return AttemptResult.failure(attemptedAt, TransportError.INVALID_DESTINATION, elapsedMs(started));
 		}
-		catch (IOException ex) {
-			TransportError error = classify(ex);
-			log.debug("Webhook attempt for notification event {} failed: {}", delivery.id().value(), error);
-			return AttemptResult.failure(attemptedAt, error, elapsedMs(started));
+		byte[] body = WebhookBody.from(delivery).toJson(json).getBytes(StandardCharsets.UTF_8);
+		HttpPost request = new HttpPost(destination.uri());
+		request.setConfig(RequestConfig.custom().setResponseTimeout(Timeout.of(requestTimeout)).build());
+		request.setHeader("Content-Type", "application/json");
+		request.setHeader("Cobre-Notification-Id", delivery.id().value());
+		request.setEntity(new ByteArrayEntity(body, null));
+		if (delivery.secretCiphertext() != null) {
+			String signature = sign(delivery, attemptedAt, body);
+			if (signature == null) {
+				return AttemptResult.failure(attemptedAt, TransportError.SIGNING_ERROR, elapsedMs(started));
+			}
+			request.setHeader(WebhookSigner.SIGNATURE_HEADER, signature);
+		}
+		// The total deadline of this attempt: connect, TLS, sending and receiving the status line. Apache's own timeouts
+		// are per operation (a receiver that sends one byte every few seconds never trips them), so a watchdog aborts
+		// the request, which closes its socket and releases the connection, when the whole budget is spent.
+		AtomicBoolean expired = new AtomicBoolean();
+		ScheduledFuture<?> deadline = watchdogs.schedule(() -> {
+			expired.set(true);
+			request.cancel();
+		}, requestTimeout.toNanos(), TimeUnit.NANOSECONDS);
+		try {
+			return execute(delivery, destination, request, attemptedAt, started, expired);
+		}
+		finally {
+			deadline.cancel(false);
 		}
 	}
 
-	private static URI parse(String url) {
-		try {
-			return URI.create(url);
+	private AttemptResult execute(Delivery delivery, DestinationPolicy.Destination destination, HttpPost request,
+			Instant attemptedAt, long started, AtomicBoolean expired) {
+		IOException lastRefused = null;
+		// Every address the policy validated, in order. Only a refused connection (nothing was sent) moves on to the
+		// next one; any other outcome is the result of this attempt.
+		for (InetAddress address : destination.addresses()) {
+			if (expired.get()) {
+				break;
+			}
+			// The validated address is the connection target; the host name stays for the Host header, SNI and the
+			// certificate check. The client has no resolver, so it cannot look the name up again.
+			HttpHost target = new HttpHost(destination.uri().getScheme(), address, destination.host(), HTTPS_PORT);
+			try {
+				ClassicHttpResponse response = client.executeOpen(target, request, null);
+				try {
+					// A status that arrives after the deadline (the abort lost the race, or the transport ignored it) is
+					// not trusted: it is recorded as a timeout, never as a delivery. The receiver may have processed the
+					// request, which is the usual at-least-once trade-off of a retry.
+					if (expired.get() || elapsedNanos(started) >= requestTimeout.toNanos()) {
+						return AttemptResult.failure(attemptedAt, TransportError.TIMEOUT, elapsedMs(started));
+					}
+					return AttemptResult.response(attemptedAt, response.getCode(), elapsedMs(started));
+				}
+				finally {
+					discard(response);
+				}
+			}
+			catch (ConnectException ex) {
+				lastRefused = ex;
+			}
+			catch (IOException ex) {
+				return failed(delivery, attemptedAt, started, expired.get() ? null : ex);
+			}
 		}
-		catch (IllegalArgumentException ex) {
+		return failed(delivery, attemptedAt, started, expired.get() ? null : lastRefused);
+	}
+
+	/**
+	 * Releases the connection without reading the body: only the status matters, and a slow or endless body must not
+	 * hold the consumer (a graceful close would read the rest of it). An empty body keeps the connection reusable.
+	 */
+	private static void discard(ClassicHttpResponse response) {
+		try {
+			if (response.getEntity() != null && response.getEntity().getContentLength() != 0
+					&& response instanceof ModalCloseable closeable) {
+				closeable.close(CloseMode.IMMEDIATE);
+			}
+			else {
+				response.close();
+			}
+		}
+		catch (IOException ex) {
+			// The attempt already has its result; a failed close only costs the connection.
+			log.debug("Closing the webhook response failed: {}", ex.getClass().getSimpleName());
+		}
+	}
+
+	/**
+	 * @param ex the transport failure, or null when the deadline aborted the request (always a timeout)
+	 */
+	private AttemptResult failed(Delivery delivery, Instant attemptedAt, long started, IOException ex) {
+		if (ex == null) {
+			log.debug("Webhook attempt for notification event {} hit the total deadline", delivery.id().value());
+			return AttemptResult.failure(attemptedAt, TransportError.TIMEOUT, elapsedMs(started));
+		}
+		if (Thread.currentThread().isInterrupted()) {
+			// The consumer is shutting down: let the message be redelivered rather than record a fake failure.
+			throw new IllegalStateException("Interrupted while sending webhook", ex);
+		}
+		TransportError error = classify(ex);
+		log.debug("Webhook attempt for notification event {} failed: {}", delivery.id().value(), error);
+		return AttemptResult.failure(attemptedAt, error, elapsedMs(started));
+	}
+
+	/**
+	 * Decrypts the secret for this one request and signs with the timestamp of this attempt. Returns null when the
+	 * secret cannot be decrypted (wrong key, tampered or foreign ciphertext): the request is then never sent unsigned.
+	 * The plaintext is a local variable only; nothing about it is logged.
+	 */
+	private String sign(Delivery delivery, Instant attemptedAt, byte[] body) {
+		try {
+			String secret = new String(secretCipher.decrypt(delivery.secretCiphertext(), delivery.subscriptionId()),
+					StandardCharsets.UTF_8);
+			return signer.sign(secret, attemptedAt.getEpochSecond(), body);
+		}
+		catch (RuntimeException ex) {
+			// The exception messages of the cipher are fixed texts, but log only the class to be safe.
+			log.error("Cannot sign notification event {}: {}", delivery.id().value(), ex.getClass().getSimpleName());
 			return null;
 		}
 	}
 
 	private static TransportError classify(IOException ex) {
 		for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
-			if (cause instanceof HttpTimeoutException) {
+			if (cause instanceof SocketTimeoutException || cause instanceof ConnectTimeoutException) {
 				return TransportError.TIMEOUT;
 			}
 			if (cause instanceof SSLException) {
@@ -105,8 +265,12 @@ class HttpsWebhookSender implements WebhookSender {
 		return TransportError.CONNECTION;
 	}
 
+	private static long elapsedNanos(long startedNanos) {
+		return System.nanoTime() - startedNanos;
+	}
+
 	private static int elapsedMs(long startedNanos) {
-		return (int) Duration.ofNanos(System.nanoTime() - startedNanos).toMillis();
+		return (int) Duration.ofNanos(elapsedNanos(startedNanos)).toMillis();
 	}
 
 }

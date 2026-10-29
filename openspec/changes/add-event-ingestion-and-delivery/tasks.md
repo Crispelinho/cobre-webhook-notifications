@@ -22,9 +22,9 @@
 
 ## 4. After `add-subscription-management` is merged
 
-- [ ] 4.1 Send-time destination validation with the shared destination policy
-- [ ] 4.2 HMAC `Cobre-Signature` header with the subscription secret
-- [ ] 4.3 Tests for the private-address and signature scenarios
+- [x] 4.1 Send-time destination validation with the shared destination policy
+- [x] 4.2 HMAC `Cobre-Signature` header with the subscription secret
+- [x] 4.3 Tests for the private-address and signature scenarios
 
 ## 5. Verification
 
