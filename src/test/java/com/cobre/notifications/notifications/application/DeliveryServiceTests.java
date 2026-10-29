@@ -86,6 +86,60 @@ class DeliveryServiceTests {
 	}
 
 	@Test
+	void aReplayOfAnInactiveSubscriptionSkipsOnlyTheInactivityCheckAndSendsTheAttempt() {
+		store.current = delivery(DeliveryStatus.PENDING, 2, 0);
+		store.subscriptionActive = false;
+
+		assertThat(service.deliver(new DispatchMessage("N1", 2))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(sent).hasSize(1);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+	}
+
+	@Test
+	void aReplayStillStopsWhenTheSenderRefusesIt() {
+		store.current = delivery(DeliveryStatus.PENDING, 2, 0);
+		store.subscriptionActive = false;
+		nextResult = AttemptResult.failure(NOW, TransportError.MISSING_SECRET, 0);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 2))).isEqualTo(DeliveryResult.FAILED);
+
+		assertThat(store.current.lastError()).isEqualTo("missing_secret");
+	}
+
+	@Test
+	void aRetryOfAnInactiveSubscriptionSendsNothing() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 2);
+		store.subscriptionActive = false;
+
+		service.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(sent).isEmpty();
+		assertThat(store.current.lastError()).isEqualTo("subscription_inactive");
+	}
+
+	@Test
+	void aRetryOfAReactivatedSubscriptionContinuesAndSends() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 2);
+		store.subscriptionActive = true;
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(sent).hasSize(1);
+	}
+
+	@Test
+	void reactivatingTheSubscriptionDoesNotReopenAFailedNotification() {
+		store.current = delivery(DeliveryStatus.FAILED, 1, 5);
+		store.subscriptionActive = true;
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+	}
+
+	@Test
 	void reactivatingTheSubscriptionDoesNotResendACancelledNotification() {
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
 		store.subscriptionActive = false;

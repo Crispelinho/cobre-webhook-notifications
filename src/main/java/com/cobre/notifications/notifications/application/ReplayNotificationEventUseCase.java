@@ -16,7 +16,6 @@ import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.notifications.domain.NotReplayableException;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
-import com.cobre.notifications.notifications.domain.SubscriptionInactiveException;
 
 /**
  * Replays a failed notification event. The store writes the new round and its outbox row in one transaction and only if
@@ -59,16 +58,9 @@ public class ReplayNotificationEventUseCase implements ReplayNotificationEvent {
 			return Optional.empty();
 		}
 		NotificationEvent before = found.get();
-		if (!store.isSubscriptionActive(clientId, id)) {
-			throw new SubscriptionInactiveException();
-		}
 		NotificationEvent after = before.replay();
 		if (!store.startReplay(before, after, clock.instant())) {
 			log.info("Replay of notification event {} lost to a concurrent change", id.value());
-			if (!store.isSubscriptionActive(clientId, id)) {
-				// The atomic condition in the UPDATE refused it: the subscription was deactivated after the first check.
-				throw new SubscriptionInactiveException();
-			}
 			throw new NotReplayableException();
 		}
 		log.info("Notification event {} replayed: round {}", id.value(), after.round());

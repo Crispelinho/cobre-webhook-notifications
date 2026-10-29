@@ -20,7 +20,6 @@ import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.NotReplayableException;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
-import com.cobre.notifications.notifications.domain.SubscriptionInactiveException;
 import com.cobre.notifications.support.RecordingAuditLog;
 
 class ReplayNotificationEventUseCaseTests {
@@ -49,26 +48,15 @@ class ReplayNotificationEventUseCaseTests {
 	}
 
 	@Test
-	void aReplayOfAnInactiveSubscriptionIsRefusedAsConflict() {
+	void aReplayOfAFailedEventWhoseSubscriptionIsNowInactiveIsAccepted() {
 		store.stored = event(OWNER, DeliveryStatus.FAILED, 1);
-		store.subscriptionActive = false;
 
-		assertThatThrownBy(() -> useCase.replay(OWNER, ID)).isInstanceOf(SubscriptionInactiveException.class)
-			.isInstanceOf(NotReplayableException.class);
+		Optional<NotificationEvent> result = useCase.replay(OWNER, ID);
 
-		assertThat(store.started).isEmpty();
+		assertThat(result).hasValueSatisfying(replayed -> assertThat(replayed.round()).isEqualTo(2));
+		assertThat(store.started).hasSize(1);
 		assertThat(audit.entries)
-			.containsExactly(new AuditEntry("CLIENT002", "notification_event.replay", "EVT003", AuditOutcome.REJECTED));
-	}
-
-	@Test
-	void aDeactivationBetweenTheCheckAndTheWriteIsRefusedAsInactive() {
-		store.stored = event(OWNER, DeliveryStatus.FAILED, 1);
-		store.deactivateOnStart = true;
-
-		assertThatThrownBy(() -> useCase.replay(OWNER, ID)).isInstanceOf(SubscriptionInactiveException.class);
-
-		assertThat(store.started).isEmpty();
+			.containsExactly(new AuditEntry("CLIENT002", "notification_event.replay", "EVT003", AuditOutcome.SUCCESS));
 	}
 
 	@Test
@@ -162,15 +150,6 @@ class ReplayNotificationEventUseCaseTests {
 
 		boolean acceptWrites = true;
 
-		boolean subscriptionActive = true;
-
-		boolean deactivateOnStart;
-
-		@Override
-		public boolean isSubscriptionActive(ClientId clientId, NotificationEventId id) {
-			return subscriptionActive;
-		}
-
 		final List<NotificationEvent> started = new ArrayList<>();
 
 		Instant startedAt;
@@ -182,10 +161,6 @@ class ReplayNotificationEventUseCaseTests {
 
 		@Override
 		public boolean startReplay(NotificationEvent before, NotificationEvent after, Instant now) {
-			if (deactivateOnStart) {
-				subscriptionActive = false;
-				return false;
-			}
 			if (!acceptWrites) {
 				return false;
 			}

@@ -53,6 +53,13 @@ public record Delivery(NotificationEventId id, String eventId, String eventType,
 	}
 
 	/**
+	 * Whether this is a replay: round 1 is the original delivery and only a replay starts a later round.
+	 */
+	public boolean isReplay() {
+		return round > 1;
+	}
+
+	/**
 	 * Whether a dispatch message of {@code messageRound} still has work to do: the event is not final and the message
 	 * belongs to the current round.
 	 */

@@ -114,26 +114,33 @@ class ReplayAcceptanceTests {
 		}
 
 		@Test
-		void aReplayOfAnInactiveSubscriptionIsRefusedWith409AndStartsNoRound() throws Exception {
+		void aReplayOfAFailedEventWhoseSubscriptionIsInactiveIsAcceptedAndStartsRoundTwo() throws Exception {
 			String subscriptionId = jdbc.sql("SELECT subscription_id FROM notifications WHERE id = 'EVT009'")
 				.query(String.class)
 				.single();
-			Integer roundBefore = jdbc.sql("SELECT round FROM notifications WHERE id = 'EVT009'")
-				.query(Integer.class)
+			var before = jdbc.sql("SELECT delivery_status, delivery_date, last_error, version FROM notifications "
+					+ "WHERE id = 'EVT009'")
+				.query((rs, i) -> new Object[] { rs.getString(1), rs.getTimestamp(2), rs.getString(3), rs.getLong(4) })
 				.single();
 			jdbc.sql("UPDATE subscriptions SET active = false WHERE id = :id").param("id", subscriptionId).update();
 			try {
-				mvc.perform(replayAs("CLIENT003", "EVT009"))
-					.andExpect(status().isConflict())
-					.andExpect(jsonPath("$.detail").value("The subscription is inactive; activate it before replaying."));
+				mvc.perform(replayAs("CLIENT003", "EVT009")).andExpect(status().isAccepted());
+				assertThat(jdbc.sql("SELECT round FROM notifications WHERE id = 'EVT009'")
+					.query(Integer.class)
+					.single()).isEqualTo(2);
 			}
 			finally {
+				// Put the seeded row back so the other scenarios of this class still see a failed round 1.
 				jdbc.sql("UPDATE subscriptions SET active = true WHERE id = :id").param("id", subscriptionId).update();
+				jdbc.sql("DELETE FROM outbox WHERE notification_id = 'EVT009' AND round = 2").update();
+				jdbc.sql("UPDATE notifications SET round = 1, delivery_status = :s, delivery_date = :d, "
+						+ "last_error = :e, version = :v WHERE id = 'EVT009'")
+					.param("s", before[0])
+					.param("d", before[1])
+					.param("e", before[2])
+					.param("v", before[3])
+					.update();
 			}
-
-			assertThat(jdbc.sql("SELECT round FROM notifications WHERE id = 'EVT009'")
-				.query(Integer.class)
-				.single()).isEqualTo(roundBefore);
 		}
 
 		@Test

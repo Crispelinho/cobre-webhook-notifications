@@ -82,17 +82,15 @@ class JdbcReplayStoreAdapterTests {
 	}
 
 	@Test
-	void aSubscriptionDeactivatedAfterTheCheckMatchesZeroRowsAndStartsNoRound() {
+	void aFailedNotificationOfAnInactiveSubscriptionStartsRoundTwo() {
 		NotificationEvent failed = store.findById(CLIENT, ID).orElseThrow();
-		assertThat(store.isSubscriptionActive(CLIENT, ID)).isTrue();
-		// The deactivation lands between the check and the write.
 		jdbc.sql("UPDATE subscriptions SET active = false WHERE id = 'S1'").update();
 
 		boolean started = store.startReplay(failed, failed.replay(), T0);
 
-		assertThat(started).isFalse();
-		assertThat(roundTwoOutboxRows("N1")).isEmpty();
-		assertThat(store.findById(CLIENT, ID).orElseThrow().round()).isEqualTo(1);
+		assertThat(started).isTrue();
+		assertThat(roundTwoOutboxRows("N1")).hasSize(1);
+		assertThat(store.findById(CLIENT, ID).orElseThrow().round()).isEqualTo(2);
 	}
 
 	@Test
