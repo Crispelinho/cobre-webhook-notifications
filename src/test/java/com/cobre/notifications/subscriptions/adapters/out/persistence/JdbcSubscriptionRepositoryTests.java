@@ -4,7 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,16 +18,19 @@ import org.springframework.boot.jdbc.test.autoconfigure.JdbcTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import com.cobre.notifications.subscriptions.application.SubscriptionChanges;
-import com.cobre.notifications.subscriptions.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.subscriptions.domain.EventTypes;
 import com.cobre.notifications.subscriptions.domain.Subscription;
 import com.cobre.notifications.subscriptions.domain.SubscriptionId;
+import com.cobre.notifications.subscriptions.domain.SubscriptionLimitReachedException;
 import com.cobre.notifications.subscriptions.domain.WebhookUrl;
 
 @JdbcTest
@@ -56,6 +64,95 @@ class JdbcSubscriptionRepositoryTests {
 		assertThat(repository.findById(CLIENT_001, subscription.id())).contains(subscription);
 		assertThat(jdbc.sql("SELECT secret_ciphertext FROM subscriptions WHERE id = 'S1'").query(byte[].class).single())
 			.containsExactly(1, 2, 3);
+	}
+
+	@Test
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	void concurrentInsertsNeverExceedTheLimit() throws Exception {
+		ClientId client = new ClientId("CLIENT_RACE_CREATE");
+		CountDownLatch start = new CountDownLatch(1);
+		ExecutorService pool = Executors.newFixedThreadPool(16);
+		try {
+			List<Future<Boolean>> results = new ArrayList<>();
+			for (int i = 0; i < 60; i++) {
+				String id = "RACE_CREATE_" + i;
+				results.add(pool.submit(() -> {
+					start.await();
+					return repository.insertIfBelowLimit(subscription(id, client, CREATED_AT, "a"), new byte[] { 1 }, 50);
+				}));
+			}
+			start.countDown();
+			long inserted = 0;
+			for (Future<Boolean> result : results) {
+				if (result.get()) {
+					inserted++;
+				}
+			}
+			assertThat(inserted).isEqualTo(50);
+			assertThat(countActive(client)).isEqualTo(50);
+		}
+		finally {
+			pool.shutdownNow();
+			jdbc.sql("DELETE FROM subscriptions WHERE client_id = :clientId").param("clientId", client.value()).update();
+		}
+	}
+
+	@Test
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
+	void concurrentReactivationsCannotBothPassTheLimit() throws Exception {
+		ClientId client = new ClientId("CLIENT_RACE_REACTIVATE");
+		for (int i = 0; i < 49; i++) {
+			repository.insert(subscription("RACE_ACTIVE_" + i, client, CREATED_AT, "a"), new byte[] { 1 });
+		}
+		repository.insert(subscription("RACE_OFF_A", client, CREATED_AT, "a"), new byte[] { 1 });
+		repository.insert(subscription("RACE_OFF_B", client, CREATED_AT, "a"), new byte[] { 1 });
+		jdbc.sql("UPDATE subscriptions SET active = false WHERE client_id = :clientId AND id LIKE 'RACE_OFF_%'")
+			.param("clientId", client.value())
+			.update();
+		CountDownLatch start = new CountDownLatch(1);
+		ExecutorService pool = Executors.newFixedThreadPool(2);
+		try {
+			List<Future<Object>> results = new ArrayList<>();
+			for (String id : List.of("RACE_OFF_A", "RACE_OFF_B")) {
+				results.add(pool.submit(() -> {
+					start.await();
+					try {
+						return repository.updateWithinLimit(client, new SubscriptionId(id),
+								new SubscriptionChanges(true, null), 50)
+							.isPresent();
+					}
+					catch (SubscriptionLimitReachedException ex) {
+						return "refused";
+					}
+				}));
+			}
+			start.countDown();
+			long reactivated = 0;
+			long refused = 0;
+			for (Future<Object> result : results) {
+				Object outcome = result.get();
+				if (Boolean.TRUE.equals(outcome)) {
+					reactivated++;
+				}
+				else if ("refused".equals(outcome)) {
+					refused++;
+				}
+			}
+			assertThat(reactivated).isEqualTo(1);
+			assertThat(refused).isEqualTo(1);
+			assertThat(countActive(client)).isEqualTo(50);
+		}
+		finally {
+			pool.shutdownNow();
+			jdbc.sql("DELETE FROM subscriptions WHERE client_id = :clientId").param("clientId", client.value()).update();
+		}
+	}
+
+	private long countActive(ClientId client) {
+		return jdbc.sql("SELECT count(*) FROM subscriptions WHERE client_id = :clientId AND active")
+			.param("clientId", client.value())
+			.query(Long.class)
+			.single();
 	}
 
 	@Test

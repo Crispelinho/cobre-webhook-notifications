@@ -18,8 +18,8 @@ class EventsConfiguration {
 
 	@Bean
 	IngestEventUseCase ingestEventUseCase(ActiveSubscriptionsPort subscriptions, EventStorePort store,
-			NotificationIdGenerator ids) {
-		return new IngestEventUseCase(subscriptions, store, ids, Clock.systemUTC());
+			NotificationIdGenerator ids, Clock clock) {
+		return new IngestEventUseCase(subscriptions, store, ids, clock);
 	}
 
 }

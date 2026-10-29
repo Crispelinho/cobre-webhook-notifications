@@ -4,7 +4,7 @@ import java.util.Optional;
 
 import com.cobre.notifications.notifications.application.Page;
 import com.cobre.notifications.notifications.application.PageQuery;
-import com.cobre.notifications.notifications.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
 import com.cobre.notifications.notifications.domain.NotificationFilter;

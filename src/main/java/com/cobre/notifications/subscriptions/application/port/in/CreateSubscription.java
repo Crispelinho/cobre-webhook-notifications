@@ -1,7 +1,7 @@
 package com.cobre.notifications.subscriptions.application.port.in;
 
 import com.cobre.notifications.subscriptions.application.CreatedSubscription;
-import com.cobre.notifications.subscriptions.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.subscriptions.domain.EventTypes;
 import com.cobre.notifications.subscriptions.domain.WebhookUrl;
 

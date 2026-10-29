@@ -19,7 +19,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
-import com.cobre.notifications.notifications.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;

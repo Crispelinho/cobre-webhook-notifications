@@ -18,11 +18,12 @@ import org.junit.jupiter.api.Test;
 import com.cobre.notifications.audit.application.AuditEntry;
 import com.cobre.notifications.audit.application.AuditOutcome;
 import com.cobre.notifications.subscriptions.application.port.out.SubscriptionRepository;
-import com.cobre.notifications.subscriptions.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.subscriptions.domain.EventTypes;
 import com.cobre.notifications.subscriptions.domain.InvalidSubscriptionException;
 import com.cobre.notifications.subscriptions.domain.Subscription;
 import com.cobre.notifications.subscriptions.domain.SubscriptionId;
+import com.cobre.notifications.subscriptions.domain.SubscriptionLimitReachedException;
 import com.cobre.notifications.subscriptions.domain.WebhookUrl;
 import com.cobre.notifications.support.RecordingAuditLog;
 
@@ -166,10 +167,35 @@ class SubscriptionServiceTests {
 			service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT);
 		}
 
-		assertThatExceptionOfType(InvalidSubscriptionException.class)
+		assertThatExceptionOfType(SubscriptionLimitReachedException.class)
 			.isThrownBy(() -> service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT))
 			.withMessageContaining("maximum");
 		assertThat(service.create(CLIENT_002, SAFE_URL, CREDIT_DEPOSIT).subscription().clientId()).isEqualTo(CLIENT_002);
+	}
+
+	@Test
+	void reactivationCountsAgainstTheCap() {
+		Subscription first = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
+		service.deactivate(CLIENT_001, first.id());
+		for (int i = 0; i < SubscriptionService.MAX_ACTIVE_PER_CLIENT; i++) {
+			service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT);
+		}
+
+		assertThatExceptionOfType(SubscriptionLimitReachedException.class)
+			.isThrownBy(() -> service.update(CLIENT_001, first.id(), new SubscriptionChanges(true, null)))
+			.withMessageContaining("maximum");
+		assertThat(service.get(CLIENT_001, first.id()).orElseThrow().active()).isFalse();
+	}
+
+	@Test
+	void patchingAnActiveSubscriptionAtTheCapIsAllowed() {
+		Subscription first = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
+		for (int i = 1; i < SubscriptionService.MAX_ACTIVE_PER_CLIENT; i++) {
+			service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT);
+		}
+
+		assertThat(service.update(CLIENT_001, first.id(), new SubscriptionChanges(true, null)).orElseThrow().active())
+			.isTrue();
 	}
 
 	@Test
@@ -251,6 +277,29 @@ class SubscriptionServiceTests {
 				subscriptions.put(id, updated);
 				return updated;
 			});
+		}
+
+		@Override
+		public boolean insertIfBelowLimit(Subscription subscription, byte[] secretCiphertext, int activeLimit) {
+			if (countActive(subscription.clientId()) >= activeLimit) {
+				return false;
+			}
+			insert(subscription, secretCiphertext);
+			return true;
+		}
+
+		@Override
+		public Optional<Subscription> updateWithinLimit(ClientId clientId, SubscriptionId id, SubscriptionChanges changes,
+				int activeLimit) {
+			Optional<Subscription> current = findById(clientId, id);
+			if (current.isEmpty()) {
+				return Optional.empty();
+			}
+			boolean reactivating = Boolean.TRUE.equals(changes.active()) && !current.get().active();
+			if (reactivating && countActive(clientId) >= activeLimit) {
+				throw new SubscriptionLimitReachedException(activeLimit);
+			}
+			return update(clientId, id, changes);
 		}
 
 	}

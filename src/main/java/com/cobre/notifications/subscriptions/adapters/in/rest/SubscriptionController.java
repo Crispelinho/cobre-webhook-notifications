@@ -25,7 +25,7 @@ import com.cobre.notifications.subscriptions.application.port.in.DeactivateSubsc
 import com.cobre.notifications.subscriptions.application.port.in.GetSubscription;
 import com.cobre.notifications.subscriptions.application.port.in.ListSubscriptions;
 import com.cobre.notifications.subscriptions.application.port.in.UpdateSubscription;
-import com.cobre.notifications.subscriptions.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.subscriptions.domain.EventTypes;
 import com.cobre.notifications.subscriptions.domain.SubscriptionId;
 import com.cobre.notifications.subscriptions.domain.WebhookUrl;

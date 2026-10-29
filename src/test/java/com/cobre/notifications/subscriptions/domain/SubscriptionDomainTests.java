@@ -1,5 +1,7 @@
 package com.cobre.notifications.subscriptions.domain;
 
+import com.cobre.notifications.kernel.domain.ClientId;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 

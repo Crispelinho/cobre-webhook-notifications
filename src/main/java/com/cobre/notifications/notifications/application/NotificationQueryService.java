@@ -6,7 +6,7 @@ import java.util.Optional;
 import com.cobre.notifications.notifications.application.port.in.GetNotificationEvent;
 import com.cobre.notifications.notifications.application.port.in.ListNotificationEvents;
 import com.cobre.notifications.notifications.application.port.out.NotificationQueryPort;
-import com.cobre.notifications.notifications.domain.ClientId;
+import com.cobre.notifications.kernel.domain.ClientId;
 import com.cobre.notifications.notifications.domain.NotificationEvent;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
 import com.cobre.notifications.notifications.domain.NotificationFilter;
