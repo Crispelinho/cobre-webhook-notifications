@@ -7,10 +7,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
+import com.cobre.notifications.audit.application.AuditLog;
 import com.cobre.notifications.notifications.application.DeliveryService;
 import com.cobre.notifications.notifications.application.NotificationQueryService;
 import com.cobre.notifications.notifications.application.RelayOutbox;
 import com.cobre.notifications.notifications.application.ReplayNotificationEventUseCase;
+import com.cobre.notifications.notifications.application.port.out.DeliveryMetrics;
 import com.cobre.notifications.notifications.application.port.out.DeliveryStore;
 import com.cobre.notifications.notifications.application.port.out.DispatchPublisher;
 import com.cobre.notifications.notifications.application.port.out.NotificationQueryPort;
@@ -31,8 +33,8 @@ class NotificationsConfiguration {
 	}
 
 	@Bean
-	ReplayNotificationEventUseCase replayNotificationEvent(ReplayStore replayStore) {
-		return new ReplayNotificationEventUseCase(replayStore, Clock.systemUTC());
+	ReplayNotificationEventUseCase replayNotificationEvent(ReplayStore replayStore, AuditLog auditLog) {
+		return new ReplayNotificationEventUseCase(replayStore, Clock.systemUTC(), auditLog);
 	}
 
 	@Bean
@@ -43,8 +45,8 @@ class NotificationsConfiguration {
 
 	@Bean
 	DeliveryService deliveryService(DeliveryStore store, WebhookSender sender,
-			@Value("${app.delivery.retry.max-attempts:5}") int maxAttempts) {
-		return new DeliveryService(store, sender, Clock.systemUTC(), maxAttempts);
+			@Value("${app.delivery.retry.max-attempts:5}") int maxAttempts, DeliveryMetrics metrics) {
+		return new DeliveryService(store, sender, Clock.systemUTC(), maxAttempts, metrics);
 	}
 
 }

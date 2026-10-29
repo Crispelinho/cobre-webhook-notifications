@@ -15,6 +15,8 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
+import com.cobre.notifications.audit.application.AuditEntry;
+import com.cobre.notifications.audit.application.AuditOutcome;
 import com.cobre.notifications.subscriptions.application.port.out.SubscriptionRepository;
 import com.cobre.notifications.subscriptions.domain.ClientId;
 import com.cobre.notifications.subscriptions.domain.EventTypes;
@@ -22,6 +24,7 @@ import com.cobre.notifications.subscriptions.domain.InvalidSubscriptionException
 import com.cobre.notifications.subscriptions.domain.Subscription;
 import com.cobre.notifications.subscriptions.domain.SubscriptionId;
 import com.cobre.notifications.subscriptions.domain.WebhookUrl;
+import com.cobre.notifications.support.RecordingAuditLog;
 
 class SubscriptionServiceTests {
 
@@ -37,12 +40,66 @@ class SubscriptionServiceTests {
 
 	private final InMemoryRepository repository = new InMemoryRepository();
 
+	private final RecordingAuditLog audit = new RecordingAuditLog();
+
 	private final SubscriptionService service = new SubscriptionService(repository, url -> {
 		if (url.equals(UNSAFE_URL)) {
 			throw new InvalidSubscriptionException("url is not an allowed destination");
 		}
 	}, owner -> new IssuedSecret("whsec_plain", new byte[] { 9, 9, 9 }),
-			Clock.fixed(Instant.parse("2026-10-28T12:00:00Z"), ZoneOffset.UTC));
+			Clock.fixed(Instant.parse("2026-10-28T12:00:00Z"), ZoneOffset.UTC), audit);
+
+	@Test
+	void creationIsAuditedOnceWithTheNewSubscriptionId() {
+		Subscription created = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
+
+		assertThat(audit.entries).containsExactly(new AuditEntry("CLIENT001", "subscription.create",
+				created.id().value(), AuditOutcome.SUCCESS));
+	}
+
+	@Test
+	void aRejectedCreationIsAuditedAsRejected() {
+		assertThatExceptionOfType(InvalidSubscriptionException.class)
+			.isThrownBy(() -> service.create(CLIENT_001, UNSAFE_URL, CREDIT_DEPOSIT));
+
+		assertThat(audit.entries).containsExactly(
+				new AuditEntry("CLIENT001", "subscription.create", "none", AuditOutcome.REJECTED));
+	}
+
+	@Test
+	void updateIsAuditedOnce() {
+		Subscription created = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
+		audit.entries.clear();
+
+		service.update(CLIENT_001, created.id(), new SubscriptionChanges(null, CREDIT_DEPOSIT));
+
+		assertThat(audit.entries).containsExactly(new AuditEntry("CLIENT001", "subscription.update",
+				created.id().value(), AuditOutcome.SUCCESS));
+	}
+
+	@Test
+	void deactivationIsAuditedOnceAndNotAlsoAsAnUpdate() {
+		Subscription created = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
+		audit.entries.clear();
+
+		service.deactivate(CLIENT_001, created.id());
+
+		assertThat(audit.entries).containsExactly(new AuditEntry("CLIENT001", "subscription.deactivate",
+				created.id().value(), AuditOutcome.SUCCESS));
+	}
+
+	@Test
+	void changingASubscriptionOfAnotherClientIsAuditedAsNotFound() {
+		Subscription created = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
+		audit.entries.clear();
+
+		service.deactivate(CLIENT_002, created.id());
+		service.update(CLIENT_002, created.id(), new SubscriptionChanges(null, CREDIT_DEPOSIT));
+
+		assertThat(audit.entries).containsExactly(
+				new AuditEntry("CLIENT002", "subscription.deactivate", created.id().value(), AuditOutcome.NOT_FOUND),
+				new AuditEntry("CLIENT002", "subscription.update", created.id().value(), AuditOutcome.NOT_FOUND));
+	}
 
 	@Test
 	void createdSubscriptionIsActiveOwnedByTheClientAndStoresOnlyTheCiphertext() {
@@ -134,7 +191,7 @@ class SubscriptionServiceTests {
 		}, owner -> {
 			owners.add(owner);
 			return new IssuedSecret("whsec_plain", new byte[] { 1 });
-		}, Clock.systemUTC());
+		}, Clock.systemUTC(), new RecordingAuditLog());
 
 		Subscription created = service.create(CLIENT_001, SAFE_URL, CREDIT_DEPOSIT).subscription();
 
