@@ -153,6 +153,7 @@ Compare with a constant-time function. Reject the request if `t` is more than a 
 | Signature check fails | The body was parsed and re-serialized before checking, or the secret is not the one returned on creation | Hash the raw bytes. The secret cannot be recovered: create a new subscription if you lost it. |
 | Startup fails with `Bind for 0.0.0.0:9092 failed: port is already allocated` | Another Compose stack (for example, the main checkout's) or leftover Testcontainers containers hold the port | Do not stop another project's stack. Use the dedicated containers in [Step 3](#step-3-start-the-service-with-that-host-allowed). Check with `docker ps`. |
 | `Port 8081 was already in use` | Another local app runs on the port | Set `SERVER_PORT` to a free port. |
+| `429 Too Many Requests` on `/subscriptions` or `/notification_events` | The per-client limit of 100 requests per minute (`app.rate-limit.requests-per-minute`) is exhausted | Wait for the `Retry-After` time, or raise the limit for local runs. `POST /events` is not limited. |
 | Receiver gets a rejection for `127.0.0.1` with `host is not in the allowlist` | The allowlist check runs before the public-address check, so a loopback host fails on the allowlist first | Expected. The public-address rule is only reached for an allowlisted host. It is covered by the unit tests with a fake resolver (`DestinationPolicyTests`), not by this manual run. |
 
 ## Verified run
