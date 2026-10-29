@@ -2,7 +2,7 @@
 
 Delivers platform events to client webhooks over HTTPS and gives clients a self-service REST API to query and replay their notifications. Built for the Cobre technical challenge.
 
-> **Status:** project scaffold. The first change (`add-self-service-query`) is specified and pending implementation. See [Roadmap](#roadmap).
+> **Status:** all five OpenSpec changes are implemented on `develop`. Two are archived into `openspec/specs/`; three are merged and waiting to be archived. See [Roadmap](#roadmap).
 
 ## What it does
 
@@ -13,11 +13,11 @@ Delivers platform events to client webhooks over HTTPS and gives clients a self-
 
 | Endpoint | Purpose | Status |
 |---|---|---|
-| `GET /notification_events` | List notification events with filters and pagination | Specified |
-| `GET /notification_events/{notification_event_id}` | Notification event detail with delivery attempts | Specified |
-| `POST /notification_events/{notification_event_id}/replay` | Re-send a failed notification event | Planned |
-| `POST /events` | Ingest a platform event (internal, service credentials) | Planned |
-| `/subscriptions` | Manage webhook subscriptions | Planned |
+| `GET /notification_events` | List notification events with filters and pagination | Implemented |
+| `GET /notification_events/{notification_event_id}` | Notification event detail with delivery attempts | Implemented |
+| `POST /notification_events/{notification_event_id}/replay` | Re-send a failed notification event | Implemented |
+| `POST /events` | Ingest a platform event (internal, `events:write` scope) | Implemented |
+| `/subscriptions` | Create, list, read, patch and deactivate webhook subscriptions | Implemented |
 
 ## Architecture
 
@@ -66,7 +66,18 @@ docker compose up -d
 | Kafka | `9092` |
 | Grafana | [http://localhost:3000](http://localhost:3000) |
 
-The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` is expected to start these services automatically. Running the application end to end is verified in the first implemented change.
+The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` is expected to start these services automatically. The end-to-end flow (HTTPS delivery through a public tunnel, retries, replay) is documented and was verified in the [local HTTPS delivery runbook](docs/process/local-https-delivery-runbook.md).
+
+### Run the service
+
+```bash
+SPRING_PROFILES_ACTIVE=local SERVER_PORT=8081 ./gradlew bootRun
+```
+
+- `SERVER_PORT` defaults to `8081` (set in `application.yaml`); override it if the port is taken.
+- The `local` profile enables the development JWT issuer and the sample data. Create a development token with `./gradlew devToken --args="CLIENT001 notifications:read"`.
+- Add the `demo` profile (`local,demo`) to shorten retry delays to seconds, for demonstrations.
+- To receive real HTTPS deliveries from your machine, follow the [local HTTPS delivery runbook](docs/process/local-https-delivery-runbook.md).
 
 ### Webhook configuration
 
@@ -101,11 +112,11 @@ openspec validate --all --strict
 
 | # | OpenSpec change | Status |
 |---|---|---|
-| 1 | `add-self-service-query` | Specified |
-| 2 | `add-event-ingestion-and-delivery` | Planned |
-| 3 | `add-notification-replay` | Planned |
-| 4 | `add-subscription-management` | Planned |
-| 5 | `add-observability-and-audit` | Planned |
+| 1 | `add-self-service-query` | Implemented, archived |
+| 2 | `add-event-ingestion-and-delivery` | Implemented, merged; archive pending |
+| 3 | `add-notification-replay` | Implemented, merged; archive pending |
+| 4 | `add-subscription-management` | Implemented, archived |
+| 5 | `add-observability-and-audit` | Implemented, merged; archive pending |
 
 ## Documentation
 

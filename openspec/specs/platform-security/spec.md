@@ -31,11 +31,16 @@ The self-service API SHALL require a JWT bearer token signed with RS256. The sys
 
 ### Requirement: Scope-based authorization
 
-Reading notification events SHALL require the `notifications:read` scope.
+Each endpoint SHALL require its own scope: `notifications:read` to read notification events, `notifications:replay` to replay one, `subscriptions:read` to read subscriptions, `subscriptions:write` to create, patch or deactivate them, and `events:write` for the internal `POST /events`. Client tokens SHALL NOT carry `events:write`.
 
 #### Scenario: Missing read scope
 
 - **WHEN** a client with a valid token but without `notifications:read` requests `GET /notification_events`
+- **THEN** the response is `403`
+
+#### Scenario: Client token on the internal endpoint
+
+- **WHEN** a client token without `events:write` calls `POST /events`
 - **THEN** the response is `403`
 
 ### Requirement: Client isolation
@@ -90,11 +95,17 @@ Each subscription SHALL get a random 256-bit secret, returned only when the subs
 #### Scenario: Secret stored encrypted
 
 - **WHEN** a subscription is created
-- **THEN** the stored `secret_ciphertext` differs from the returned secret and decrypts back to it with the configured key
+- **THEN** the stored `secret_ciphertext` differs from the returned secret and decrypts back to it with the configured key and the subscription id as associated data; decryption with any other id fails
 
 ### Requirement: Webhook signature
 
-The signer SHALL produce `Cobre-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "t.body">` with the subscription secret, so receivers can verify the sender and reject requests older than 5 minutes.
+The signer SHALL produce `Cobre-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "t.body">` with the subscription secret, so receivers can verify the sender and reject requests older than 5 minutes. Each delivery attempt SHALL carry its own `t`, taken at the moment of that attempt. The body SHALL be the same bytes on every attempt of a notification event.
+
+#### Scenario: New timestamp per attempt, same body
+
+- **GIVEN** a notification event whose first attempt failed
+- **WHEN** the second attempt is sent
+- **THEN** its `t` is the time of the second attempt and its body is byte-identical to the body of the first attempt
 
 #### Scenario: Known test vector
 

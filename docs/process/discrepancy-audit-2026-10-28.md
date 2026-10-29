@@ -55,3 +55,39 @@ Repo-wide audit of places where two sources of truth disagree: decision log, obj
 - Whether `Redirect.NEVER` with a 302 is covered by a test.
 - Whether the unauthenticated 401 path reaches the problem+json handlers on the ingestion branch.
 - The contents of AI-usage entries 01 to 03.
+
+## Remediation status (2026-10-29)
+
+Each finding was re-checked against `develop` after the merges and then corrected in the branches `fix/subscription-cap-clock-clientid` (code) and `docs/audit-remediation` (documentation). Status:
+
+| ID | Status | Where it was fixed |
+|---|---|---|
+| 1 | Resolved | `objectives.md` |
+| 2 | Resolved | `HttpsWebhookSender` (validated address and pinning) |
+| 3 | Resolved | `notification-delivery` spec: "Subscription limits"; list limit in `self-service-api` |
+| 4 | Resolved | D17 |
+| 5 | Resolved (documented exception) | D24; seed is local-only |
+| 6 | Resolved | `notification-delivery` spec: "Empty patch" scenario |
+| 7 | Resolved | `SubscriptionService.update` and tests; spec scenarios; D53 |
+| 8 | Resolved | `platform-security` spec: associated data |
+| 9 | Resolved | D22; `platform-security` spec: scopes |
+| 10 | Resolved | `platform-security` spec: "Webhook signature" |
+| 11 | Resolved | Replay requirement in the `add-notification-replay` change |
+| 12 | **Open, needs a decision** | D49 approves honouring `Retry-After`; the code does not. See below |
+| 13 | Resolved | D50 |
+| 14 | Resolved | `security-analysis.md` |
+| 15 | Resolved | `security-analysis.md`; `objectives.md` |
+| 16 | Resolved | `README.md` |
+| 17 | Resolved | D18 |
+| 18 | Resolved | D46 |
+| 19 | Resolved | `kernel.domain.ClientId`; D51 (pending approval) |
+| 20 | Resolved | `shared.config.ClockConfiguration`; D52 (pending approval) |
+| 21 | Resolved | `.gitignore` |
+
+New findings from the same pass:
+
+- **N2:** rate limit per instance. Documented in D29 and the security analysis.
+- **N3:** migrations V3 to V5 are reserved and unused. Documented in D46.
+- **N4:** same as 7.
+- **N5 (open, needs a decision):** delivery does not check `subscriptions.active`. A notification created before a deactivation is still delivered, and a replay of it is still sent. The code joins `subscriptions` only to read the secret.
+- **N6 (open):** three merged changes (`add-event-ingestion-and-delivery`, `add-notification-replay`, `add-observability-and-audit`) are not archived into `openspec/specs/`.

@@ -62,3 +62,35 @@ The system SHALL list and return only the caller's subscriptions (scope `subscri
 
 - **WHEN** CLIENT001 patches its subscription with a new `url`
 - **THEN** the response is `400` and the subscription is unchanged
+
+#### Scenario: Empty patch
+
+- **WHEN** CLIENT001 patches its subscription with `{}`
+- **THEN** the response is `400` and the subscription is unchanged
+
+#### Scenario: Reactivation at the limit
+
+- **GIVEN** CLIENT001 has 50 active subscriptions and one inactive subscription
+- **WHEN** CLIENT001 patches the inactive subscription with `active` true
+- **THEN** the response is `400`, the subscription stays inactive, and the rejection is audited
+
+#### Scenario: Patching an active subscription at the limit
+
+- **GIVEN** CLIENT001 has 50 active subscriptions
+- **WHEN** CLIENT001 patches one of them with `active` true
+- **THEN** the response is `200`, because the count does not change
+
+### Requirement: Subscription limits
+
+A client SHALL have at most 50 active subscriptions. Creating a subscription and reactivating one both count against this limit. `event_types` SHALL hold between 1 and 50 entries, each matching `^[a-z0-9_]{1,100}$`. A webhook URL SHALL use port 443, explicit or implicit.
+
+#### Scenario: Fifty-first active subscription
+
+- **GIVEN** CLIENT001 has 50 active subscriptions
+- **WHEN** CLIENT001 creates another subscription
+- **THEN** the response is `400` with a message that names the limit
+
+#### Scenario: Non-443 port
+
+- **WHEN** CLIENT001 creates a subscription with `https://hooks.example.org:8443/cobre`
+- **THEN** the response is `400` and no subscription is stored

@@ -45,3 +45,19 @@ Of several simultaneous replays of the same notification event, exactly one SHAL
 - **GIVEN** EVT005 of CLIENT003 is `failed`
 - **WHEN** CLIENT003 sends two replays of EVT005 concurrently
 - **THEN** one response is `202`, the other is `409`, and only one new round exists
+
+### Requirement: Replay destination
+
+A replay SHALL send to the `destination_url` stored with the notification event when it was created (D13), not to the subscription's current URL. Every attempt SHALL pass the destination policy again at send time, and the signing secret SHALL be loaded by the notification's `subscription_id`.
+
+#### Scenario: Replay uses the stored URL
+
+- **GIVEN** a failed notification event whose subscription URL was changed by deleting and recreating it after the event was created
+- **WHEN** CLIENT001 replays the event
+- **THEN** the new round sends to the URL stored with the event, and the signature is produced with the secret of the event's subscription
+
+#### Scenario: Replay is checked against the policy
+
+- **GIVEN** the stored URL is no longer in `WEBHOOK_ALLOWED_HOSTS`
+- **WHEN** CLIENT001 replays the event
+- **THEN** the attempt fails with `invalid_destination` and no request is sent
