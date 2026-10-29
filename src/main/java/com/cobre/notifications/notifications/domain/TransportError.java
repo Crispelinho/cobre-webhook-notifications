@@ -6,7 +6,9 @@ package com.cobre.notifications.notifications.domain;
  */
 public enum TransportError {
 
-	TIMEOUT("timeout"), CONNECTION("connection_error"), TLS("tls_error"), INVALID_DESTINATION("invalid_destination");
+	TIMEOUT("timeout"), CONNECTION("connection_error"), TLS("tls_error"), INVALID_DESTINATION("invalid_destination"),
+	/** The subscription secret could not be decrypted, so the request cannot be signed and is never sent. */
+	SIGNING_ERROR("signing_error");
 
 	private final String errorType;
 

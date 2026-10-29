@@ -10,10 +10,12 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import com.cobre.notifications.notifications.application.DeliveryService;
 import com.cobre.notifications.notifications.application.NotificationQueryService;
 import com.cobre.notifications.notifications.application.RelayOutbox;
+import com.cobre.notifications.notifications.application.ReplayNotificationEventUseCase;
 import com.cobre.notifications.notifications.application.port.out.DeliveryStore;
 import com.cobre.notifications.notifications.application.port.out.DispatchPublisher;
 import com.cobre.notifications.notifications.application.port.out.NotificationQueryPort;
 import com.cobre.notifications.notifications.application.port.out.OutboxPort;
+import com.cobre.notifications.notifications.application.port.out.ReplayStore;
 import com.cobre.notifications.notifications.application.port.out.WebhookSender;
 
 /**
@@ -26,6 +28,11 @@ class NotificationsConfiguration {
 	@Bean
 	NotificationQueryService notificationQueryService(NotificationQueryPort notificationQueryPort) {
 		return new NotificationQueryService(notificationQueryPort);
+	}
+
+	@Bean
+	ReplayNotificationEventUseCase replayNotificationEvent(ReplayStore replayStore) {
+		return new ReplayNotificationEventUseCase(replayStore, Clock.systemUTC());
 	}
 
 	@Bean
