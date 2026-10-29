@@ -17,6 +17,7 @@ import com.cobre.notifications.notifications.application.port.out.WebhookSender;
 import com.cobre.notifications.notifications.domain.AttemptResult;
 import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
+import com.cobre.notifications.notifications.domain.DeliveryOutcome;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.Lease;
 
@@ -35,6 +36,9 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 	/** Well above the 10-second total limit of one attempt. */
 	public static final Duration DEFAULT_LEASE_DURATION = Duration.ofSeconds(60);
 
+	/** Longest wait a receiver's Retry-After can impose; a larger value is honoured up to this. */
+	public static final Duration DEFAULT_RETRY_AFTER_CAP = Duration.ofSeconds(300);
+
 	private final DeliveryStore store;
 
 	private final WebhookSender sender;
@@ -48,6 +52,8 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 	private final Duration leaseDuration;
 
 	private final String workerId = UUID.randomUUID().toString();
+
+	private final Duration retryAfterCap;
 
 	public DeliveryService(DeliveryStore store, WebhookSender sender, Clock clock, int maxAttempts) {
 		this(store, sender, clock, maxAttempts, DeliveryMetrics.NONE);
@@ -63,6 +69,14 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 	 */
 	public DeliveryService(DeliveryStore store, WebhookSender sender, Clock clock, int maxAttempts,
 			DeliveryMetrics metrics, Duration leaseDuration) {
+		this(store, sender, clock, maxAttempts, metrics, leaseDuration, DEFAULT_RETRY_AFTER_CAP);
+	}
+
+	/**
+	 * @param retryAfterCap longest wait a receiver's Retry-After can impose
+	 */
+	public DeliveryService(DeliveryStore store, WebhookSender sender, Clock clock, int maxAttempts,
+			DeliveryMetrics metrics, Duration leaseDuration, Duration retryAfterCap) {
 		if (maxAttempts < 1) {
 			throw new IllegalArgumentException("maxAttempts must be at least 1");
 		}
@@ -75,6 +89,10 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 		this.clock = Objects.requireNonNull(clock);
 		this.maxAttempts = maxAttempts;
 		this.metrics = Objects.requireNonNull(metrics);
+		if (retryAfterCap.isNegative()) {
+			throw new IllegalArgumentException("retryAfterCap must not be negative");
+		}
+		this.retryAfterCap = retryAfterCap;
 	}
 
 	@Override
@@ -90,6 +108,14 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 					message.notificationEventId(), message.round(), delivery.status().wireValue(), delivery.round());
 			return DeliveryResult.IGNORED;
 		}
+		if (delivery.nextAttemptAt() != null) {
+			// The receiver asked to wait: a stale or duplicate message must not send earlier. The scheduler enqueues
+			// the attempt when it is due.
+			log.info("Dispatch message for notification event {} round {} ignored: next attempt is scheduled",
+					message.notificationEventId(), message.round());
+			return DeliveryResult.IGNORED;
+		}
+
 
 		Optional<Claimed> claimed = claim(delivery);
 		if (claimed.isEmpty()) {
@@ -111,7 +137,15 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 		Delivery after = delivery.afterAttempt(result, clock.instant());
 		DeliveryAttempt attempt = new DeliveryAttempt(delivery.round(), delivery.nextAttemptNumber(),
 				result.attemptedAt(), result.httpStatus(), result.errorType(), result.latencyMs());
-		if (!store.recordAttempt(lease, delivery, attempt, after)) {
+		// Retry-After only chooses WHEN the next attempt happens. It never adds one: the attempt just recorded counts
+		// toward the limit, and with none left the normal exhaustion path runs.
+		// The store turns the delay into a time with the database clock, so skewed application clocks cannot make an
+		// attempt run early.
+		Duration delay = result.outcome() == DeliveryOutcome.RETRYABLE && result.retryAfter() != null
+				&& after.hasAttemptsLeft(maxAttempts) ? cap(result.retryAfter()) : null;
+		boolean recorded = delay == null ? store.recordAttempt(lease, delivery, attempt, after)
+				: store.recordAttempt(lease, delivery, attempt, after, delay);
+		if (!recorded) {
 			log.warn("Attempt {} of notification event {} round {} not recorded: lease generation {} is no longer current",
 					attempt.attemptNumber(), message.notificationEventId(), message.round(), lease.generation());
 			return DeliveryResult.IGNORED;
@@ -121,6 +155,11 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 				message.notificationEventId(), message.round(), result.outcome());
 		if (after.status() == DeliveryStatus.COMPLETED || after.status() == DeliveryStatus.FAILED) {
 			recordFinal(after);
+		}
+		if (delay != null) {
+			log.info("Next attempt of notification event {} round {} scheduled by the receiver's Retry-After",
+					message.notificationEventId(), message.round());
+			return DeliveryResult.SCHEDULED;
 		}
 		return switch (result.outcome()) {
 			case SUCCESS -> DeliveryResult.DELIVERED;
@@ -155,6 +194,10 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 			return Optional.empty();
 		}
 		return store.find(observed.id().value()).map(fresh -> new Claimed(lease.get(), fresh));
+	}
+
+	private Duration cap(Duration requested) {
+		return requested.compareTo(retryAfterCap) > 0 ? retryAfterCap : requested;
 	}
 
 	private boolean exhaust(Lease lease, Delivery delivery) {

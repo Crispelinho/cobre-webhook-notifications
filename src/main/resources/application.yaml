@@ -74,6 +74,13 @@ app:
       multiplier: 4
       max-delay: PT1H
       jitter: PT5S
+    # Longest wait a receiver's Retry-After (429 or 503 only) can impose; a larger value is honoured up to this.
+    retry-after-cap: PT300S
+    next-attempt:
+      # Polls for attempts whose Retry-After time has come and enqueues them.
+      enabled: true
+      poll-interval: PT1S
+      batch-size: 100
   rate-limit:
     # Per-client limit on the self-service API (/notification_events, /subscriptions); excess requests get 429.
     # Counted in memory per instance (D29).

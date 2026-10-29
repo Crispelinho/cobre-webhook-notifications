@@ -9,6 +9,8 @@ public enum DeliveryResult {
 	DELIVERED,
 	/** The attempt failed in a way worth repeating: schedule the next attempt. */
 	RETRY,
+	/** The receiver asked to wait (Retry-After): the next attempt is stored and the scheduler enqueues it. */
+	SCHEDULED,
 	/** The notification event is {@code failed}; do not retry. */
 	FAILED,
 	/** Nothing to do: the message is a duplicate, stale, or refers to an unknown notification event. */

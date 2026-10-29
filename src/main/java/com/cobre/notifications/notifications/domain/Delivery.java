@@ -25,11 +25,20 @@ import java.util.Objects;
  * @param subscriptionId owner of {@code secretCiphertext}; the associated data needed to decrypt it
  * @param secretCiphertext the subscription secret exactly as stored (encrypted), or null for an unsigned
  * subscription. The domain never sees the plaintext: the sender decrypts it for one request and drops it.
+ * @param nextAttemptAt when set, the receiver asked (Retry-After) to wait: the scheduler enqueues the next attempt
+ * then, and an earlier dispatch message sends nothing. Null in every other case.
  */
 public record Delivery(NotificationEventId id, String eventId, String eventType, String content,
 		String destinationUrl, Instant createdAt, DeliveryStatus status, int round, int attemptsInRound,
 		Instant deliveryDate, Instant deliveredAt, String lastError, long version, String subscriptionId,
-		byte[] secretCiphertext) {
+		byte[] secretCiphertext, Instant nextAttemptAt) {
+
+	public Delivery(NotificationEventId id, String eventId, String eventType, String content, String destinationUrl,
+			Instant createdAt, DeliveryStatus status, int round, int attemptsInRound, Instant deliveryDate,
+			Instant deliveredAt, String lastError, long version, String subscriptionId, byte[] secretCiphertext) {
+		this(id, eventId, eventType, content, destinationUrl, createdAt, status, round, attemptsInRound, deliveryDate,
+				deliveredAt, lastError, version, subscriptionId, secretCiphertext, null);
+	}
 
 	/**
 	 * A delivery without signing material (unsigned subscription).

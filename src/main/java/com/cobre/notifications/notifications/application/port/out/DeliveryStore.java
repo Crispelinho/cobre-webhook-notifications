@@ -37,6 +37,13 @@ public interface DeliveryStore {
 	boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after);
 
 	/**
+	 * Like {@link #recordAttempt(Lease, Delivery, DeliveryAttempt, Delivery)}, and also stores that the next attempt is
+	 * due after {@code delay} (the receiver's Retry-After, already capped). The store adds the delay to the database
+	 * clock, the only time reference of scheduling. Every other write clears that time.
+	 */
+	boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after, Duration delay);
+
+	/**
 	 * Stores a state change that is not an attempt (retries exhausted) and releases the lease.
 	 *
 	 * @return {@code false} if the generation token, the stored version or the state no longer matches; nothing was

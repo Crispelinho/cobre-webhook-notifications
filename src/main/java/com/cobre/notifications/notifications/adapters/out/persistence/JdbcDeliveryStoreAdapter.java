@@ -52,7 +52,7 @@ class JdbcDeliveryStoreAdapter implements DeliveryStore, LeaseRecoveryStore {
 		return jdbc.sql("""
 				SELECT n.id, n.event_id, e.event_type, e.content, n.destination_url, n.created_at,
 				       n.delivery_status, n.round, n.delivery_date, n.delivered_at, n.last_error, n.version,
-				       n.subscription_id, s.secret_ciphertext,
+				       n.subscription_id, s.secret_ciphertext, n.next_attempt_at,
 				       (SELECT count(*) FROM delivery_attempts a
 				         WHERE a.notification_id = n.id AND a.round = n.round) AS attempts_in_round
 				FROM notifications n
@@ -187,8 +187,14 @@ class JdbcDeliveryStoreAdapter implements DeliveryStore, LeaseRecoveryStore {
 
 	@Override
 	public boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after) {
+		return recordAttempt(lease, before, attempt, after, null);
+	}
+
+	@Override
+	public boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after,
+			Duration delay) {
 		return Boolean.TRUE.equals(transactions.execute(status -> {
-			if (!applyState(lease, before, after, 1)) {
+			if (!applyState(lease, before, after, 1, delay)) {
 				return false;
 			}
 			try {
@@ -215,15 +221,17 @@ class JdbcDeliveryStoreAdapter implements DeliveryStore, LeaseRecoveryStore {
 
 	@Override
 	public boolean updateState(Lease lease, Delivery before, Delivery after) {
-		return applyState(lease, before, after, 0);
+		return applyState(lease, before, after, 0, null);
 	}
 
-	private boolean applyState(Lease lease, Delivery before, Delivery after, int attemptsAdded) {
+	private boolean applyState(Lease lease, Delivery before, Delivery after, int attemptsAdded, Duration delay) {
 		return jdbc.sql("""
 				UPDATE notifications
 				SET delivery_status = :status, attempts = attempts + :attemptsAdded, delivery_date = :deliveryDate,
-				    delivered_at = :deliveredAt, last_error = :lastError, version = version + 1,
-				    lease_owner = NULL, lease_expires_at = NULL
+				    delivered_at = :deliveredAt, last_error = :lastError,
+				    next_attempt_at = CASE WHEN CAST(:delaySeconds AS double precision) IS NULL THEN NULL
+				                           ELSE now() + make_interval(secs => CAST(:delaySeconds AS double precision)) END,
+				    version = version + 1, lease_owner = NULL, lease_expires_at = NULL
 				WHERE id = :id AND generation = :generation AND version = :version AND round = :round
 				  AND delivery_status IN ('pending', 'retrying')
 				""")
@@ -233,6 +241,7 @@ class JdbcDeliveryStoreAdapter implements DeliveryStore, LeaseRecoveryStore {
 			.param("deliveryDate", timestamp(after.deliveryDate()))
 			.param("deliveredAt", timestamp(after.deliveredAt()))
 			.param("lastError", after.lastError())
+			.param("delaySeconds", delay == null ? null : delay.toMillis() / 1000.0)
 			.param("id", before.id().value())
 			.param("version", before.version())
 			.param("round", before.round())
@@ -251,7 +260,8 @@ class JdbcDeliveryStoreAdapter implements DeliveryStore, LeaseRecoveryStore {
 				instant(rs, "created_at"), DeliveryStatus.fromWireValue(rs.getString("delivery_status")),
 				rs.getInt("round"), rs.getInt("attempts_in_round"), instant(rs, "delivery_date"),
 				instant(rs, "delivered_at"), rs.getString("last_error"), rs.getLong("version"),
-				rs.getString("subscription_id"), rs.getBytes("secret_ciphertext"));
+				rs.getString("subscription_id"), rs.getBytes("secret_ciphertext"),
+				instant(rs, "next_attempt_at"));
 	}
 
 	private static Instant instant(ResultSet rs, String column) throws SQLException {
