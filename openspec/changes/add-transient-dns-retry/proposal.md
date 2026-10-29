@@ -17,7 +17,7 @@ Existing decisions relied on: D54 (every DNS failure at send time is retryable; 
 
 New decisions:
 
-1. **`error_type` value.** Proposed: `dns_error`, next to `timeout` and `connection_error`. *No decision-log entry needed if accepted.*
+1. **`error_type` value.** Proposed: `dns_error`, next to `timeout` and `connection_error`. *Recorded as D66.*
 
 ## Impact
 

@@ -20,8 +20,8 @@ Existing decisions relied on: D24 (signature format, 5-minute tolerance, `Cobre-
 
 New decisions:
 
-1. **Byte-identical body across rounds, not only across attempts.** Proposed: yes; a replay sends the same bytes as the first round, so receivers can compare bodies under the same `Cobre-Notification-Id`. This requires deterministic serialization or storing the serialized body. Alternative: identical only within a round. The delta specs are drafted with the proposed option ("every attempt, in every round"); if the alternative is chosen, the "Webhook signature" and "Deduplication identifier" requirements must be narrowed. *Needs a new decision-log entry.*
-2. **Delivery semantics as a decision-log entry.** Decision 6 is approved in the reconciliation plan but has no D-entry; by the authority order it should be recorded. *Needs a new decision-log entry.*
+1. **Byte-identical body across rounds, not only across attempts.** Proposed: yes; a replay sends the same bytes as the first round, so receivers can compare bodies under the same `Cobre-Notification-Id`. This requires deterministic serialization or storing the serialized body. Alternative: identical only within a round. The delta specs are drafted with the proposed option ("every attempt, in every round"); if the alternative is chosen, the "Webhook signature" and "Deduplication identifier" requirements must be narrowed. *Recorded as D64: identical in every round.*
+2. **Delivery semantics as a decision-log entry.** Decision 6 is approved in the reconciliation plan but has no D-entry; by the authority order it should be recorded. *Recorded as D55.*
 3. **Ciphertext format version byte as associated data.** The code already includes a format version in the associated data. Proposed: keep it as an implementation detail, not in the spec. *No decision-log entry needed.*
 
 ## Impact
