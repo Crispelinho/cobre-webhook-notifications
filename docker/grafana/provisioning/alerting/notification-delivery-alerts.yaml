@@ -10,13 +10,13 @@ groups:
     interval: 10s
     rules:
       - uid: cobre-failed-rate
-        title: Permanent delivery failure rate above 5%
+        title: Failed notification rate above 5%
         condition: C
         for: 1m
         noDataState: OK
         execErrState: Error
         annotations:
-          summary: More than 5% of delivery attempts failed permanently in the last 5 minutes (retries not counted).
+          summary: More than 5% of notification events ended failed in the last 5 minutes (retries already exhausted).
         labels:
           severity: warning
         data:
@@ -27,8 +27,8 @@ groups:
               refId: A
               instant: true
               expr: >-
-                sum(rate(notification_delivery_attempts_total{outcome="permanent"}[5m]))
-                / sum(rate(notification_delivery_attempts_total[5m]))
+                sum(rate(notification_delivery_end_to_end_duration_seconds_count{status="failed"}[5m]))
+                / sum(rate(notification_delivery_end_to_end_duration_seconds_count[5m]))
           - refId: B
             datasourceUid: __expr__
             model:
