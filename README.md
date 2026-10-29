@@ -130,6 +130,7 @@ Changes 6 to 9 come from the [reconciliation plan](docs/process/discrepancy-reco
 | [Security analysis](docs/security/security-analysis.md) | Threat model, OWASP API Top 10 mitigations and supply-chain findings |
 | [Workflow](docs/process/workflow.md) | SDD lifecycle, branching, commits, CI and AI review |
 | [Local HTTPS delivery runbook](docs/process/local-https-delivery-runbook.md) | Receiving a signed webhook over real HTTPS from a local run, with verified results |
+| [Seed and demo test plan](docs/process/seed-and-demo-test-plan.md) | Test cases for seed data, delivery, failure, replay and observability |
 | [Discrepancy audit](docs/process/discrepancy-audit-2026-10-28.md) | Differences found between decisions, specs and code |
 | [Discrepancy reconciliation](docs/process/discrepancy-reconciliation-2026-10-28.md) | How each difference is resolved, and the pending work |
 | [OpenSpec project context](openspec/project.md) | Conventions, domain vocabulary and assumptions |
