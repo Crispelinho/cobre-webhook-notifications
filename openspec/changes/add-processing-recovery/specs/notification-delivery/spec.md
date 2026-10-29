@@ -46,9 +46,26 @@ The system SHALL periodically find notification events whose lease expired witho
 - **WHEN** its third attempt is interrupted and recovered
 - **THEN** the two earlier attempts are unchanged
 
+### Requirement: Recovery timing and attempt count
+
+The lease SHALL default to 60 seconds and the recovery sweep SHALL run every 30 seconds by default; both SHALL be configurable. The lease SHALL NOT be exposed as a public `delivery_status` value. An interrupted attempt SHALL count toward the 5 attempts of the round.
+
+#### Scenario: Lease is not visible in the API
+
+- **GIVEN** a worker holds a lease on a `pending` notification event
+- **WHEN** the client reads the notification event
+- **THEN** its `delivery_status` is `pending`
+
+#### Scenario: Interrupted fifth attempt
+
+- **GIVEN** a notification event with four recorded attempts in its round
+- **WHEN** its fifth attempt is interrupted and the lease expires
+- **THEN** the notification event becomes `failed` without sending another request
+- **AND** it can be replayed
+
 ### Requirement: Replay destination and secret
 
-A replayed round SHALL send to the `destination_url` snapshot stored on the notification event, not to the URL of any other subscription. Before each request of the round, the destination SHALL be validated again with the destination policy, and a rejected destination SHALL fail the attempt permanently without sending a request. The signing secret SHALL be loaded by the notification event's `subscription_id`.
+A replayed round SHALL send to the `destination_url` snapshot stored on the notification event, not to the URL of any other subscription. Before each request of the round, the destination SHALL be validated again with the destination policy, and a rejected destination SHALL fail the attempt permanently without sending a request. The signing secret SHALL be loaded by the notification event's `subscription_id`. A replay SHALL be allowed when that subscription is now inactive.
 
 #### Scenario: Client registered a new URL after the first round
 
@@ -68,3 +85,10 @@ A replayed round SHALL send to the `destination_url` snapshot stored on the noti
 - **GIVEN** a `failed` notification event of subscription S1 with a known secret
 - **WHEN** the client replays it
 - **THEN** the `Cobre-Signature` header verifies with the secret of S1
+
+#### Scenario: Subscription deactivated after the first round
+
+- **GIVEN** a `failed` notification event of subscription S1
+- **AND** S1 was deactivated afterwards
+- **WHEN** the client replays the notification event
+- **THEN** the replay is accepted and the request is sent to the snapshot destination, signed with the secret of S1
