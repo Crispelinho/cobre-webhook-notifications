@@ -15,7 +15,7 @@ Task 3: the API can be consumed publicly over the internet. This document identi
 | OWASP API 2023 | OWASP 2021 | Threat | Mitigation | Test |
 |---|---|---|---|---|
 | **API1: Broken Object Level Authorization** | A01 Broken Access Control | CLIENT001 reads or replays EVT003 (owned by CLIENT002) by guessing IDs. | `client_id` comes only from the token. Every query port requires `ClientId`. A foreign resource returns the same `404` as a missing one. | CLIENT001 requests EVT003 and a non-existent ID: both `404` with the same body. `?client_id=CLIENT002` is ignored. |
-| **API2: Broken Authentication** | A07 Identification and Authentication Failures | Forged, expired or wrongly scoped tokens; a client token used on the internal endpoint. | RS256 signature, `exp`, `iss` and `aud` validation; `client_id` claim required; scopes per endpoint. | Missing, expired, wrongly signed and claim-less tokens return `401` without revealing the reason; a missing scope returns `403`; endpoints without an explicit rule are denied. A client token on `POST /events` returning `403` is planned with the ingestion change. |
+| **API2: Broken Authentication** | A07 Identification and Authentication Failures | Forged, expired or wrongly scoped tokens; a client token used on the internal endpoint. | RS256 signature, `exp`, `iss` and `aud` validation; `client_id` claim required; scopes per endpoint. | Missing, expired, wrongly signed and claim-less tokens return `401` without revealing the reason; a missing scope returns `403`; endpoints without an explicit rule are denied. A client token on `POST /events` returns `403`: the endpoint requires `SCOPE_events:write` (`SecurityConfig`). |
 | **API7: Server Side Request Forgery** | A10 SSRF | A webhook URL such as `https://169.254.169.254/` or `https://localhost/admin` turns the service into a proxy into the internal network. | HTTPS only; host allowlist from configuration; DNS resolution checked against private, loopback and link-local ranges at registration and at send time; connection to the validated IP; no redirects; URLs never taken from events. | Subscriptions to `http://…`, `https://127.0.0.1` or a host outside the allowlist are rejected; a redirect response is not followed. |
 
 ## Risks documented
@@ -25,7 +25,7 @@ Task 3: the API can be consumed publicly over the internet. This document identi
 | **API3: Broken Object Property Level Authorization** (mass assignment) | Explicit request DTOs; `PATCH` accepts only `active` and `event_types`; `client_id` is never read from the body. |
 | **API4: Unrestricted Resource Consumption** | Page size capped at 100; HTTP timeouts on webhooks; per-client rate limiting with Bucket4j (Could). |
 | **API8: Security Misconfiguration** | Actuator exposes only `health` and `info`; errors as problem details without stack traces; container images pinned. |
-| **API10 / A06 Vulnerable and Outdated Components** (supply chain) | Dependency graph submission and dependency review on every pull request; vulnerable transitive dependencies pinned to patched versions (decision D30). |
+| **A06:2021 Vulnerable and Outdated Components** (supply chain; OWASP Top 10 2021, not in API Top 10 2023) | Dependency graph submission and dependency review on every pull request; vulnerable transitive dependencies pinned to patched versions (decision D30). |
 
 ## Webhook authenticity
 

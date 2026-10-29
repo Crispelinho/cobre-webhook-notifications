@@ -32,10 +32,10 @@ All decisions taken during refinement and design (2026-10-28). Each one was appr
 | D14 | Kafka for dispatch, retry topics and dead-letter topic; PostgreSQL as source of truth with a transactional outbox. | RabbitMQ; SQS on LocalStack; PostgreSQL-only queue. | Aligns with the stack Cobre publishes in job postings (secondary source, not confirmed by Cobre). The outbox avoids the dual-write problem. | Human over AI |
 | D15 | Outbox relay polls with `SELECT … FOR UPDATE SKIP LOCKED`. | Debezium CDC. | No extra infrastructure; safe with several replicas. Debezium is the evolution. | AI |
 | D16 | Kafka partition key = `notification_event_id`; no ordering guarantee (documented). | `subscription_id` (per-destination order). | Even load; a slow client cannot block others on its partition. | AI |
-| D17 | Non-blocking retries with `@RetryableTopic`; the dead-letter handler marks the notification event `failed`. Replay starts from the database, never from the dead-letter topic. | Blocking retries. | One unhealthy receiver does not delay others. | AI |
+| D17 | Non-blocking retries with `@RetryableTopic` (implemented with `RetryTopicConfigurationBuilder`, its programmatic form, in `DispatchRetryConfiguration`); the dead-letter handler marks the notification event `failed`. Replay starts from the database, never from the dead-letter topic. | Blocking retries. | One unhealthy receiver does not delay others. | AI |
 | D18 | 5 attempts per round, exponential backoff with jitter, per profile (demo: 0 s, 10 s, 30 s, 1 min, 2 min). | Fixed delays. | Visible in a live demo; realistic in production profile. | AI |
-| D19 | Retried: timeouts, connection errors, `5xx`, `408`, `429` (honoring a capped `Retry-After`). Immediate `failed`: other `4xx`, TLS or certificate errors, SSRF-blocked destinations. | Retry everything. | Retrying permanent errors wastes capacity. | AI |
-| D20 | HTTP timeouts: connect 2 s, read 5 s, total 10 s. | Library defaults. | A slow receiver must not hold consumer threads. | AI |
+| D19 | Retried: timeouts, connection errors, `5xx`, `408`, `429` (honoring a capped `Retry-After`; the cap is set by D49). Immediate `failed`: other `4xx`, TLS or certificate errors, SSRF-blocked destinations. | Retry everything. | Retrying permanent errors wastes capacity. | AI |
+| D20 | HTTP timeouts: connect 2 s, read 5 s, total 10 s. The read timeout is removed and the total limit is set by D50. | Library defaults. | A slow receiver must not hold consumer threads. | AI |
 | D21 | The domain classifies outcomes (`SUCCESS`, `RETRYABLE`, `PERMANENT`); the Kafka adapter only maps them to retry or no retry. | Retry rules inside Kafka configuration. | Business rules survive a broker change (fallback plan). | AI |
 
 ## Security
