@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.cobre.notifications.events.application.port.in.IngestEvent;
+import com.cobre.notifications.events.domain.EventValidationException;
 
 /**
  * Ingestion endpoint for internal producers (scope {@code events:write}). The {@code client_id} in the body is the
@@ -28,7 +29,7 @@ class EventController {
 	@ResponseStatus(HttpStatus.ACCEPTED)
 	IngestEventResponse ingest(@RequestBody IngestEventRequest request) {
 		if (request.hasUnknownFields()) {
-			throw new IllegalArgumentException("Request contains unknown fields.");
+			throw new EventValidationException("Request contains unknown fields.");
 		}
 		return IngestEventResponse
 			.from(ingestEvent.ingest(request.eventId, request.clientId, request.eventType, request.content));

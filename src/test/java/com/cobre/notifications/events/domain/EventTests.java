@@ -27,39 +27,39 @@ class EventTests {
 	@ValueSource(strings = { "   ", "Credit_Deposit", "credit-deposit", "credit deposit", "credit_dépôt" })
 	void rejectsAnInvalidEventType(String eventType) {
 		assertThatThrownBy(() -> new Event("E1", "CLIENT001", eventType, "x", NOW))
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(EventValidationException.class);
 	}
 
 	@Test
 	void eventTypeLengthBoundaryIs100() {
 		assertThatCode(() -> new Event("E1", "C", "a".repeat(100), "x", NOW)).doesNotThrowAnyException();
 		assertThatThrownBy(() -> new Event("E1", "C", "a".repeat(101), "x", NOW))
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(EventValidationException.class);
 	}
 
 	@ParameterizedTest
 	@NullAndEmptySource
 	@ValueSource(strings = " ")
 	void rejectsAMissingEventIdOrClientIdOrContent(String blank) {
-		assertThatThrownBy(() -> new Event(blank, "C", "t", "x", NOW)).isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new Event("E", blank, "t", "x", NOW)).isInstanceOf(IllegalArgumentException.class);
-		assertThatThrownBy(() -> new Event("E", "C", "t", blank, NOW)).isInstanceOf(IllegalArgumentException.class);
+		assertThatThrownBy(() -> new Event(blank, "C", "t", "x", NOW)).isInstanceOf(EventValidationException.class);
+		assertThatThrownBy(() -> new Event("E", blank, "t", "x", NOW)).isInstanceOf(EventValidationException.class);
+		assertThatThrownBy(() -> new Event("E", "C", "t", blank, NOW)).isInstanceOf(EventValidationException.class);
 	}
 
 	@Test
 	void identifierLengthBoundaryIs64() {
 		assertThatCode(() -> new Event("e".repeat(64), "c".repeat(64), "t", "x", NOW)).doesNotThrowAnyException();
 		assertThatThrownBy(() -> new Event("e".repeat(65), "C", "t", "x", NOW))
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(EventValidationException.class);
 		assertThatThrownBy(() -> new Event("E", "c".repeat(65), "t", "x", NOW))
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(EventValidationException.class);
 	}
 
 	@Test
 	void contentLengthBoundaryIs10000() {
 		assertThatCode(() -> new Event("E", "C", "t", "x".repeat(10_000), NOW)).doesNotThrowAnyException();
 		assertThatThrownBy(() -> new Event("E", "C", "t", "x".repeat(10_001), NOW))
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(EventValidationException.class);
 	}
 
 	@Test

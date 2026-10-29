@@ -7,7 +7,7 @@ public interface IngestEvent {
 
 	/**
 	 * Stores the event and creates a pending notification event per matching subscription.
-	 * @throws IllegalArgumentException if the event violates a domain rule
+	 * @throws com.cobre.notifications.events.domain.EventValidationException if the event violates a domain rule
 	 * @throws DuplicateEventException if the {@code eventId} was already accepted
 	 */
 	IngestionResult ingest(String eventId, String clientId, String eventType, String content);
