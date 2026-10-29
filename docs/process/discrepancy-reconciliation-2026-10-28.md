@@ -31,7 +31,7 @@ An open gap must be written as *partial* in the security analysis. It must not b
 
 ### A. Documentation only
 
-- Item 1: `objectives.md` corrected in this commit. HMAC moves from *Should* to *Must*, and IP pinning against DNS rebinding moves from *Could* to *Must*. **AES-GCM is still listed as *Could*** while D25 treats it as in force. That correction is pending.
+- Item 1: `objectives.md` corrected in this commit. HMAC moves from *Should* to *Must*, and IP pinning against DNS rebinding moves from *Could* to *Must*. AES-GCM moves from *Could* to *Must*, consistent with D25 (done in this commit).
 - Item 9: add `subscriptions:read` and `subscriptions:write` to D22 and to the platform-security spec.
 - Item 14: relabel the row as OWASP 2021 A06, or map it to API9:2023.
 - Item 16: update the README (status banner, endpoint table, roadmap, `demo` profile).
@@ -85,9 +85,9 @@ The developer approved these resolutions on 2026-10-29.
 
 ## 5. Pending before implementation
 
-- **Decision log.** D19 needs the 300-second cap and D20 needs the decision on read and total timeouts. Both are decisions, so they need a new or superseding entry, not an edit of the existing text. This needs approval.
-- **Specs.** Section 3B needs a change proposal before any requirement changes.
-- **AES-GCM.** The objectives still list it as *Could* while D25 treats it as in force. Same correction as HMAC, pending the developer's decision.
+- **Decision log.** Done: D49 (300-second `Retry-After` cap) and D50 (10-second total timeout, read timeout removed) supersede the relevant parts of D19 and D20.
+- **Specs.** Section 3B still needs a change proposal before any requirement changes.
+- **AES-GCM.** Done: moved to *Must* in `objectives.md`, consistent with D25.
 - **Implementation.** Not authorized yet.
 
 ## 6. Validation plan
