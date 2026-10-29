@@ -3,6 +3,7 @@ package com.cobre.notifications.notifications.adapters.in.seed;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.sql.Types;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -14,6 +15,7 @@ import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -22,6 +24,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cobre.notifications.shared.crypto.SecretCipher;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -29,6 +32,12 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Loads {@code seed/notification_events.json} as notification events, with one seed subscription per client. The
  * sample has no creation date, so {@code created_at} uses the sample {@code delivery_date}. Inserting is idempotent.
+ * <p>
+ * Every seed subscription is signed: the secret comes from external configuration ({@code app.seed.secret}, backed by
+ * the {@code DEMO_WEBHOOK_SECRET} environment variable, with no value in the repository), is encrypted with
+ * {@link SecretCipher} using the subscription id as associated data, and is re-applied at every startup so a row left
+ * without a secret by an earlier run is repaired. A missing or blank secret fails startup: there is no unsigned seed
+ * subscription.
  */
 @Component
 @ConditionalOnBooleanProperty("app.seed.enabled")
@@ -42,9 +51,21 @@ public class SampleDataSeeder {
 
 	private final JsonMapper jsonMapper;
 
-	SampleDataSeeder(JdbcClient jdbc, JsonMapper jsonMapper) {
+	private final SecretCipher secretCipher;
+
+	private final byte[] secret;
+
+	SampleDataSeeder(JdbcClient jdbc, JsonMapper jsonMapper, SecretCipher secretCipher,
+			@Value("${app.seed.secret:}") String secret) {
+		if (secret == null || secret.isBlank()) {
+			throw new IllegalStateException("app.seed.secret is required when app.seed.enabled is true: set the "
+					+ "DEMO_WEBHOOK_SECRET environment variable to a development-only webhook secret. Seed "
+					+ "subscriptions are never created without a secret.");
+		}
 		this.jdbc = jdbc;
 		this.jsonMapper = jsonMapper;
+		this.secretCipher = secretCipher;
+		this.secret = secret.strip().getBytes(StandardCharsets.UTF_8);
 	}
 
 	@EventListener(ApplicationReadyEvent.class)
@@ -63,11 +84,13 @@ public class SampleDataSeeder {
 
 	private void insertSubscription(String clientId, TreeSet<String> eventTypes) {
 		jdbc.sql("""
-				INSERT INTO subscriptions (id, client_id, url, event_types, created_at)
-				VALUES (:id, :clientId, :url, CAST(:eventTypes AS text[]), :createdAt)
-				ON CONFLICT (id) DO NOTHING
+				INSERT INTO subscriptions (id, client_id, url, event_types, secret_ciphertext, created_at)
+				VALUES (:id, :clientId, :url, CAST(:eventTypes AS text[]), :secretCiphertext, :createdAt)
+				ON CONFLICT (id) DO UPDATE SET secret_ciphertext = EXCLUDED.secret_ciphertext
 				""")
 			.param("id", subscriptionId(clientId))
+			// Fresh nonce per run; the subscription id binds the ciphertext to this row.
+			.param("secretCiphertext", secretCipher.encrypt(secret, subscriptionId(clientId)))
 			.param("clientId", clientId)
 			// Reserved domain: seed subscriptions are placeholders until real ones are registered.
 			.param("url", "https://webhook.example.com/" + clientId)
