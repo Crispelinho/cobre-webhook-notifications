@@ -10,6 +10,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.cobre.notifications.notifications.application.PageQuery;
 import com.cobre.notifications.notifications.application.port.in.GetNotificationEvent;
 import com.cobre.notifications.notifications.application.port.in.ListNotificationEvents;
+import com.cobre.notifications.notifications.application.port.in.ReplayNotificationEvent;
 import com.cobre.notifications.notifications.domain.ClientId;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
@@ -35,10 +37,13 @@ class NotificationEventController {
 
 	private final GetNotificationEvent getNotificationEvent;
 
+	private final ReplayNotificationEvent replayNotificationEvent;
+
 	NotificationEventController(ListNotificationEvents listNotificationEvents,
-			GetNotificationEvent getNotificationEvent) {
+			GetNotificationEvent getNotificationEvent, ReplayNotificationEvent replayNotificationEvent) {
 		this.listNotificationEvents = listNotificationEvents;
 		this.getNotificationEvent = getNotificationEvent;
+		this.replayNotificationEvent = replayNotificationEvent;
 	}
 
 	@GetMapping
@@ -67,6 +72,15 @@ class NotificationEventController {
 		return getNotificationEvent.get(clientId(jwt), new NotificationEventId(notificationEventId))
 			.<ResponseEntity<?>>map(event -> ResponseEntity.ok(NotificationEventDetailResponse.from(event)))
 			// Same answer whether the notification event is missing or owned by another client.
+			.orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
+				.body(ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "Notification event not found.")));
+	}
+
+	@PostMapping("/{notification_event_id}/replay")
+	ResponseEntity<?> replay(@AuthenticationPrincipal Jwt jwt,
+			@PathVariable("notification_event_id") String notificationEventId) {
+		return replayNotificationEvent.replay(clientId(jwt), new NotificationEventId(notificationEventId))
+			.<ResponseEntity<?>>map(event -> ResponseEntity.accepted().body(ReplayResponse.from(event)))
 			.orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
 				.body(ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, "Notification event not found.")));
 	}
