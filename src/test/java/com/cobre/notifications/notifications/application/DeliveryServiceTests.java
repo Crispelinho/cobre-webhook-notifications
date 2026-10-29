@@ -21,6 +21,7 @@ import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
 import com.cobre.notifications.notifications.domain.DeliveryOutcome;
 import com.cobre.notifications.notifications.domain.DeliveryStatus;
+import com.cobre.notifications.notifications.domain.Lease;
 import com.cobre.notifications.notifications.domain.NotificationEventId;
 import com.cobre.notifications.notifications.domain.TransportError;
 
@@ -149,6 +150,45 @@ class DeliveryServiceTests {
 		assertThat(service.deliver(new DispatchMessage("MISSING", 1))).isEqualTo(DeliveryResult.IGNORED);
 
 		assertThat(sent).isEmpty();
+	}
+
+	@Test
+	void aWorkerThatCannotClaimSendsNothingAndRecordsNothing() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.heldByAnotherWorker = true;
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.attempts).isEmpty();
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.PENDING);
+	}
+
+	@Test
+	void everyWriteCarriesTheGenerationTokenOfTheClaim() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+
+		service.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(store.claims).isEqualTo(1);
+		assertThat(store.writeTokens).containsExactly(1L);
+	}
+
+	@Test
+	void aStaleWorkerWhoseLeaseWasTakenOverIsIgnoredAndDoesNotOverwriteTheNewerResult() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.generation = 7;
+		// While the first worker is sending, its lease is taken over and the newer worker completes the event.
+		WebhookSender slowSender = delivery -> {
+			store.takeOverAndComplete();
+			return AttemptResult.response(NOW, 503, 20);
+		};
+		DeliveryService stale = new DeliveryService(store, slowSender, Clock.fixed(NOW, ZoneOffset.UTC), 5);
+
+		assertThat(stale.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+		assertThat(store.attempts).singleElement().extracting(DeliveryAttempt::httpStatus).isEqualTo(200);
 	}
 
 	@Test
@@ -285,6 +325,30 @@ class DeliveryServiceTests {
 
 		private boolean rejectNextWrite;
 
+		private boolean heldByAnotherWorker;
+
+		private long generation;
+
+		private int claims;
+
+		private final List<Long> writeTokens = new ArrayList<>();
+
+		/** Another worker reclaims the event and records a successful attempt: the token moves on. */
+		void takeOverAndComplete() {
+			generation++;
+			attempts.add(new DeliveryAttempt(1, 1, NOW, 200, null, 5));
+			current = delivery(DeliveryStatus.COMPLETED, 1, 1);
+		}
+
+		@Override
+		public Optional<Lease> claim(Delivery observed, String owner, Instant now, Duration leaseDuration) {
+			if (heldByAnotherWorker) {
+				return Optional.empty();
+			}
+			claims++;
+			return Optional.of(new Lease(owner, ++generation));
+		}
+
 		@Override
 		public Optional<Delivery> find(String notificationEventId) {
 			return current != null && current.id().value().equals(notificationEventId) ? Optional.of(current)
@@ -292,7 +356,11 @@ class DeliveryServiceTests {
 		}
 
 		@Override
-		public boolean recordAttempt(Delivery before, DeliveryAttempt attempt, Delivery after) {
+		public boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after) {
+			if (lease.generation() != generation) {
+				return false;
+			}
+			writeTokens.add(lease.generation());
 			if (rejectNextWrite) {
 				rejectNextWrite = false;
 				return false;
@@ -303,7 +371,11 @@ class DeliveryServiceTests {
 		}
 
 		@Override
-		public boolean updateState(Delivery before, Delivery after) {
+		public boolean updateState(Lease lease, Delivery before, Delivery after) {
+			if (lease.generation() != generation) {
+				return false;
+			}
+			writeTokens.add(lease.generation());
 			current = after;
 			return true;
 		}

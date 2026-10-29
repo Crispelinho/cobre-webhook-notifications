@@ -1,30 +1,47 @@
 package com.cobre.notifications.notifications.application.port.out;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 
 import com.cobre.notifications.notifications.domain.Delivery;
 import com.cobre.notifications.notifications.domain.DeliveryAttempt;
+import com.cobre.notifications.notifications.domain.Lease;
 
 /**
- * Persistence of the delivery state. Both writes are conditional on the version the caller read, so two consumers
- * handling the same notification event cannot both apply their result.
+ * Persistence of the delivery state. A worker first claims the notification event and receives a {@link Lease}; both
+ * writes are conditional on the generation token of that lease (and on the version the caller read), so a stale or
+ * duplicate worker cannot apply its result over another worker's.
  */
 public interface DeliveryStore {
 
 	Optional<Delivery> find(String notificationEventId);
 
 	/**
-	 * Stores the attempt and the resulting state in one transaction, and counts the attempt on the notification event.
+	 * Atomically takes the lease of the notification event for its current round, only if it is still open, unchanged
+	 * since {@code observed} was read, and its lease is free or expired. The generation token is increased. If the
+	 * previous lease had expired, the abandoned attempt is first appended to the history as interrupted (see
+	 * {@link DeliveryAttempt#INTERRUPTED}); callers must read the delivery again after a successful claim.
 	 *
-	 * @return {@code false} if the stored version or state no longer matches {@code before}; nothing was written
+	 * @return the lease, or empty if the notification event is held by another worker or no longer matches
 	 */
-	boolean recordAttempt(Delivery before, DeliveryAttempt attempt, Delivery after);
+	Optional<Lease> claim(Delivery observed, String owner, Instant now, Duration leaseDuration);
 
 	/**
-	 * Stores a state change that is not an attempt (retries exhausted).
+	 * Stores the attempt and the resulting state in one transaction, counts the attempt on the notification event and
+	 * releases the lease.
 	 *
-	 * @return {@code false} if the stored version or state no longer matches {@code before}; nothing was written
+	 * @return {@code false} if the generation token, the stored version or the state no longer matches; nothing was
+	 * written
 	 */
-	boolean updateState(Delivery before, Delivery after);
+	boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after);
+
+	/**
+	 * Stores a state change that is not an attempt (retries exhausted) and releases the lease.
+	 *
+	 * @return {@code false} if the generation token, the stored version or the state no longer matches; nothing was
+	 * written
+	 */
+	boolean updateState(Lease lease, Delivery before, Delivery after);
 
 }
