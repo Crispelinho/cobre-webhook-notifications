@@ -360,6 +360,21 @@ PRODUCER_TOKEN=$(./gradlew -q devToken --args="PRODUCER001 events:write")
 
 Check that both values start with `eyJ` (a JWT header) before you continue. The `-q` flag is not verified on your machine; if the output includes Gradle messages, copy only the token line.
 
+### Where WEBHOOK_ALLOWED_HOSTS comes from
+
+The tunnel host is a per-run value. A quick tunnel from `cloudflared` (and `start-local-webhook-tunnel.bat`) gets a new host on every start, and the old host stops working when its tunnel stops. So the host is never written into a versioned file. `application.yaml` reads it from the environment (`${WEBHOOK_ALLOWED_HOSTS:}`), and the `local` profile only adds the seed host by default.
+
+Set it once per run, in the IntelliJ run configuration of the service:
+
+1. Open **Run | Edit Configurations** and select the service.
+2. In **Environment variables**, set `WEBHOOK_ALLOWED_HOSTS=<host printed by the tunnel>`, with no scheme and no port.
+3. Keep the other variables (`SPRING_PROFILES_ACTIVE`, `DEMO_WEBHOOK_SECRET`) in the same field.
+4. Restart the run configuration. The value is read at startup only.
+
+If the restart does not pick the value up, `POST /subscriptions` answers `400` for the tunnel URL and the service logs `Subscription destination rejected: host is not in the allowlist`. That line is the check: it means the process did not receive the variable.
+
+Do not put a tunnel host in `application-local.yaml` or in any other versioned file. The same goes for the host of a previous run: once its tunnel has stopped, it is only history.
+
 ### Preparation
 
 1. Start PostgreSQL, Kafka and Grafana from the checkout root:
