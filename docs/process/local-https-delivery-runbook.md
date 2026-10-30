@@ -443,7 +443,7 @@ Why: `HttpsWebhookSender.send` handles the two cases differently. A `Destination
 - **Failed attempt ratio (5 min)**: rises. With few events, one failure is a large share of the window.
 - **Failed notification rate above 5%** (`cobre-failed-rate`): firing after its 1-minute `for` period.
 - **Attempt failure rate including retries above 5%** (`cobre-attempt-failure-rate`): firing after its 1-minute `for` period.
-- **Message reached the dead-letter topic** (`cobre-dead-letter`): should **not** move. Only a `RETRY` outcome throws in `DispatchConsumer`, which sends the message to the retry topics and, after the last one, to the dead-letter topic. A `PERMANENT` outcome does not throw. A host that does not resolve gives `RETRYABLE` attempts, so after five of them the message reaches the dead-letter topic, as in Scenario C. Then `cobre-dead-letter` moves for this scenario too.
+- **Message reached the dead-letter topic** (`cobre-dead-letter`): should **not** move for a `PERMANENT` outcome, because `DispatchConsumer` throws only for `RETRY` and a `PERMANENT` outcome does not throw. A host that does not resolve gives `dns_error`, which is `RETRYABLE`. In that case the message goes to `notification.dispatch-dlt` only after the last retryable attempt (the fifth), so the counter moves and the alert fires for two minutes, as in Scenario C.
 - **Oldest unpublished outbox row older than 60 s** (`cobre-outbox-age`): should stay normal.
 
 ### Scenario B: rejected destinations
@@ -542,7 +542,7 @@ For `/fail`, the second run in [Verified run](#verified-run) measured the first 
 - **Delivery attempts per second by outcome**: `success` for `/ok`, `retryable` for `/fail` (a `500` is `RETRYABLE` in `DeliveryOutcome.classify`).
 - **Attempt failure rate including retries above 5%** (`cobre-attempt-failure-rate`): firing if the window holds only these attempts, because five of six are not `success`. Scenario A's attempt is also in the window if it ran recently.
 - **Failed notification rate above 5%** (`cobre-failed-rate`): firing once `/fail` ends as `failed`.
-- **Message reached the dead-letter topic**: rises by one. The fifth attempt is `RETRYABLE`, and the message then goes to the dead-letter topic. The observed run logged it at ERROR (`Sending to DLT`). Compare with the baseline. `cobre-dead-letter` fires for two minutes after that.
+- **Message reached the dead-letter topic**: rises by one. The message goes to the dead-letter topic only after the last retryable attempt, the fifth. The observed run logged `Record: … won't be retried. Sending to DLT with name notification.dispatch-dlt` at ERROR, followed by `round 1 failed: retries exhausted`. Compare with the baseline. `cobre-dead-letter` fires for two minutes after that.
 
 ### Verification in Grafana
 
@@ -604,14 +604,14 @@ A console log of the service, started from the main checkout (`cobre-webhook-not
 | 22:04:00.121 | Attempt 4, `RETRYABLE` (+428.5 s after attempt 3) | |
 | 22:11:46 | Two `subscription.deactivate` audit lines, `success` (`01a18823-2854…` and `01a18823-26d4…`) | Cleanup of two subscriptions. Which ones is not confirmed |
 | 22:16:28 and 22:16:33 | WARN from `HikariPool-1`: `Failed to validate connection … (This connection has been closed.)` | Cause not explained. No attempt in the log is affected |
-| 22:38:37.559 | Attempt 5, `RETRYABLE` (+2 077.4 s after attempt 4). Retry topic `notification.dispatch-retry-3` | Attempt 5 did happen. It came 34 minutes after attempt 4 |
+| 22:38:37.559 | Attempt 5, `RETRYABLE` (+2 077.4 s after attempt 4). Retry topic `notification.dispatch-retry-3` | Attempt 5 happened, 34 minutes after attempt 4. The gap is not confirmed (see below) |
 | 22:38:37.567 | ERROR: the message is sent to `notification.dispatch-dlt`, with a full stack trace | Dead-letter path, after the last attempt |
 | 22:38:37.801 | ERROR: `Notification event 01a18aba-a19b-743c-91e1-bf7a93ad6983 round 1 failed: retries exhausted` | `failed` with `retries_exhausted`, as the code path defines it. The database was not queried |
 
 What this run shows:
 
-- **Attempts 1 to 5 all happened.** The attempt that looked missing was only late: 34 minutes after attempt 4, not 12. The round took 44 minutes and 27 seconds from attempt 1 to attempt 5.
-- **The gaps do not match the configured `demo` delays** of `PT10S`, `PT30S`, `PT1M` and `PT2M`. The gaps were 32.7 s, 128.7 s, 428.5 s and 2 077.4 s, which grow about four times each step. That resembles the default backoff (30 s, multiplier 4, in `application.yaml`) more than the demo one, but it does not match exactly: 428.5 s is less than the 480 s the default gives. This is a hypothesis. The startup profile line will confirm or reject it.
+- **Attempts 1 to 5 all happened.** Attempt 5 came 34 minutes after attempt 4. An earlier estimate of 12 minutes was wrong. The round took 44 minutes and 27 seconds from attempt 1 to attempt 5. The gap before attempt 5 is **not confirmed**: the run did not explain it, and it must not be read as normal behaviour.
+- **The gaps do not match the configured delays.** The configuration (`DispatchRetryConfiguration`, `application.yaml`) works as follows. With `app.delivery.retry.delays` set, which the `demo` profile does, each retry topic uses one fixed delay: `PT10S`, `PT30S`, `PT1M` and `PT2M`. Without it, the default is exponential backoff from `PT30S` with multiplier 4, about 30 s, 120 s, 480 s and 1 920 s, and each topic keeps one jitter value of up to `PT5S`, drawn once at startup. The observed gaps were 32.7 s, 128.7 s, 428.5 s and 2 077.4 s. The first fits the default; the second is above its band and the third is below it, so neither profile reproduces the run. The cause is not confirmed. The startup profile line and the retry-topic consumer logs would settle it.
 - **Scenario C reaches the dead-letter topic.** A `/fail` round ends in the dead-letter topic after its fifth attempt, so `cobre-dead-letter` should fire. The earlier expectation in this runbook, that it would not move, was wrong for `/fail`.
 - **Fan-out is not isolated.** An active subscription that was not part of the test received `DEMO-C-0001`. Check active subscriptions before a demo.
 
