@@ -33,12 +33,12 @@ import java.util.concurrent.TimeoutException;
  * {@code Host} header.
  * <p>
  * The check waits at most the resolve timeout (5 s by default) for DNS, so a slow resolver cannot hold the caller. The
- * lookup runs on a shared pool of platform threads, at most {@link #MAX_CONCURRENT_LOOKUPS} at a time. A blocking system
- * call pins its thread until the operating system returns, so the lookups never run on virtual threads: a stuck resolver
- * must not stall the carriers that run every other virtual thread. When the pool is full, the check fails at once as a
- * resolution failure.
+ * lookup runs on a pool of platform threads owned by this instance, at most the configured number at a time. A blocking
+ * system call pins its thread until the operating system returns, so the lookups never run on virtual threads: a stuck
+ * resolver must not stall the carriers that run every other virtual thread. When the pool is full, the check fails at
+ * once as a resolution failure, and {@link #close()} releases the pool threads when the application stops.
  */
-public final class DestinationPolicy {
+public final class DestinationPolicy implements AutoCloseable {
 
 	private static final int HTTPS_PORT = 443;
 
@@ -46,13 +46,11 @@ public final class DestinationPolicy {
 	public static final Duration DEFAULT_RESOLVE_TIMEOUT = Duration.ofSeconds(5);
 
 	/**
-	 * Lookups that may run at once. Each one can hold its thread in the operating system until the resolver gives up,
-	 * so this bounds how many threads a resolver outage can take.
+	 * The default number of lookups that may run at once. Each one can hold its thread in the operating system until the
+	 * resolver gives up, so this bounds how many threads a resolver outage can take. The application reads it from
+	 * {@code app.webhook.max-concurrent-lookups}, which defaults to this value.
 	 */
 	public static final int MAX_CONCURRENT_LOOKUPS = 16;
-
-	private static final ExecutorService LOOKUPS = new ThreadPoolExecutor(0, MAX_CONCURRENT_LOOKUPS, 60, TimeUnit.SECONDS,
-			new SynchronousQueue<>(), Thread.ofPlatform().name("destination-lookup-", 0).daemon(true).factory());
 
 	private final List<String> allowedHosts;
 
@@ -60,16 +58,33 @@ public final class DestinationPolicy {
 
 	private final Duration resolveTimeout;
 
-	/** Uses {@link #DEFAULT_RESOLVE_TIMEOUT}. */
+	private final ExecutorService lookups;
+
+	/** Uses {@link #DEFAULT_RESOLVE_TIMEOUT} and {@link #MAX_CONCURRENT_LOOKUPS}. */
 	public DestinationPolicy(Collection<String> allowedHosts, HostResolver resolver) {
-		this(allowedHosts, resolver, DEFAULT_RESOLVE_TIMEOUT);
+		this(allowedHosts, resolver, DEFAULT_RESOLVE_TIMEOUT, MAX_CONCURRENT_LOOKUPS);
 	}
 
+	/** Uses {@link #MAX_CONCURRENT_LOOKUPS}. */
 	public DestinationPolicy(Collection<String> allowedHosts, HostResolver resolver, Duration resolveTimeout) {
+		this(allowedHosts, resolver, resolveTimeout, MAX_CONCURRENT_LOOKUPS);
+	}
+
+	/**
+	 * @param maxConcurrentLookups how many lookups may run at once; a lookup beyond that fails at once as a resolution
+	 *     failure instead of waiting for a free thread
+	 */
+	public DestinationPolicy(Collection<String> allowedHosts, HostResolver resolver, Duration resolveTimeout,
+			int maxConcurrentLookups) {
 		Objects.requireNonNull(resolveTimeout);
 		if (resolveTimeout.isNegative() || resolveTimeout.isZero()) {
 			throw new IllegalArgumentException("resolve timeout must be positive");
 		}
+		if (maxConcurrentLookups < 1) {
+			throw new IllegalArgumentException("max concurrent lookups must be at least 1");
+		}
+		this.lookups = new ThreadPoolExecutor(0, maxConcurrentLookups, 60, TimeUnit.SECONDS, new SynchronousQueue<>(),
+				Thread.ofPlatform().name("destination-lookup-", 0).daemon(true).factory());
 		this.allowedHosts = allowedHosts.stream()
 			.map(String::strip)
 			.filter(host -> !host.isEmpty())
@@ -113,6 +128,15 @@ public final class DestinationPolicy {
 		return new Destination(uri, host, addresses);
 	}
 
+	/**
+	 * Stops the lookup threads when the application stops. Idle threads end at once; a lookup still blocked in the
+	 * operating system ends when that call returns.
+	 */
+	@Override
+	public void close() {
+		lookups.shutdownNow();
+	}
+
 	private boolean isAllowed(String host) {
 		for (String entry : allowedHosts) {
 			if (entry.startsWith(".") ? host.equals(entry.substring(1)) || host.endsWith(entry) : host.equals(entry)) {
@@ -138,7 +162,7 @@ public final class DestinationPolicy {
 	private List<InetAddress> lookup(String host) {
 		FutureTask<List<InetAddress>> task = new FutureTask<>(() -> resolver.resolve(host));
 		try {
-			LOOKUPS.execute(task);
+			lookups.execute(task);
 		}
 		catch (RejectedExecutionException ex) {
 			throw new DestinationResolutionException("name resolution is saturated");

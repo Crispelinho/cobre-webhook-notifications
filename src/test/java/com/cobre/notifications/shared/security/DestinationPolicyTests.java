@@ -9,9 +9,12 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.LockSupport;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -198,31 +201,65 @@ class DestinationPolicyTests {
 	}
 
 	@Test
-	void aFullLookupPoolIsAResolutionFailureAtOnce() throws InterruptedException {
+	void aFullLookupPoolIsAResolutionFailureAtOnceForEveryLookupOfThePolicy() throws InterruptedException {
 		// The stuck lookups ignore interrupts, like a blocking system call: they keep their pool threads until released.
 		CountDownLatch release = new CountDownLatch(1);
-		HostResolver stuck = host -> {
-			awaitIgnoringInterrupts(release);
-			return List.of(InetAddress.getByName("93.184.215.14"));
+		HostResolver mixed = host -> {
+			if (host.equals("stuck.example.org")) {
+				awaitIgnoringInterrupts(release);
+				return List.of(InetAddress.getByName("93.184.215.14"));
+			}
+			return resolver.resolve(host);
 		};
-		DestinationPolicy slow = new DestinationPolicy(List.of("stuck.example.org"), stuck, Duration.ofMillis(100));
+		DestinationPolicy shared = new DestinationPolicy(List.of("stuck.example.org", "hooks.example.org"), mixed,
+				Duration.ofMillis(100), 2);
 		try {
-			for (int i = 0; i < DestinationPolicy.MAX_CONCURRENT_LOOKUPS; i++) {
+			for (int i = 0; i < 2; i++) {
 				assertThatExceptionOfType(DestinationResolutionException.class)
-					.isThrownBy(() -> slow.check("https://stuck.example.org/"))
+					.isThrownBy(() -> shared.check("https://stuck.example.org/"))
 					.withMessage("name resolution timed out");
 			}
-			DestinationPolicy quick = new DestinationPolicy(List.of("hooks.example.org"), resolver, Duration.ofSeconds(5));
 			long started = System.nanoTime();
 
 			assertThatExceptionOfType(DestinationResolutionException.class)
-				.isThrownBy(() -> quick.check("https://hooks.example.org/"))
+				.isThrownBy(() -> shared.check("https://hooks.example.org/"))
 				.withMessage("name resolution is saturated");
 			assertThat(System.nanoTime() - started).isLessThan(Duration.ofSeconds(1).toNanos());
 		}
 		finally {
 			release.countDown();
+			shared.close();
 		}
+	}
+
+	@Test
+	void closingThePolicyReleasesItsLookupThreads() throws InterruptedException {
+		Set<Thread> before = lookupThreads();
+		DestinationPolicy policy = new DestinationPolicy(List.of("hooks.example.org"), resolver, Duration.ofSeconds(5), 4);
+		policy.check("https://hooks.example.org/");
+		Set<Thread> created = lookupThreads();
+		created.removeAll(before);
+		assertThat(created).isNotEmpty();
+
+		policy.close();
+
+		long deadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+		while (created.stream().anyMatch(Thread::isAlive) && System.nanoTime() < deadline) {
+			Thread.sleep(10);
+		}
+		assertThat(created).noneMatch(Thread::isAlive);
+	}
+
+	@Test
+	void aPoolMustHaveAtLeastOneThread() {
+		assertThatIllegalArgumentException()
+			.isThrownBy(() -> new DestinationPolicy(List.of(), resolver, Duration.ofSeconds(5), 0));
+	}
+
+	private static Set<Thread> lookupThreads() {
+		return Thread.getAllStackTraces().keySet().stream()
+			.filter(thread -> thread.getName().startsWith("destination-lookup-"))
+			.collect(Collectors.toCollection(HashSet::new));
 	}
 
 	@Test
