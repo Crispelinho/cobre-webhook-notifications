@@ -2,8 +2,8 @@
 
 ## 1. Approval and design
 
-- [ ] 1.1 Developer approves the new decisions in `proposal.md`; decision-log entries added for the delay rule and the per-message delay mechanism
-- [ ] 1.2 Resolve the contradicting `Retry-After` clause in `add-event-ingestion-and-delivery` before archive
+- [x] 1.1 Developer approves the new decisions in `proposal.md`; decision-log entries added for the delay rule and the per-message delay mechanism
+- [x] 1.2 Resolve the contradicting `Retry-After` clause in `add-event-ingestion-and-delivery` before archive
 
 ## 2. Tests first (D41)
 
@@ -20,3 +20,10 @@
 ## 4. Verification
 
 - [ ] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
+
+## Archive notes (2026-10-30)
+
+- Implemented by PR #30, with the `Retry-After: 0` and past-date fix in #35 and the end-to-end tests in #40 and #43.
+- 1.1: decisions D53, D63 and D68 are in the decision log.
+- 1.2: the contradicting clause of `add-event-ingestion-and-delivery` was corrected before that change was archived (#33).
+- 4.1: the build passed in CI on #30, #35, #40 and #43. There is no record of the fresh-context AI review.
