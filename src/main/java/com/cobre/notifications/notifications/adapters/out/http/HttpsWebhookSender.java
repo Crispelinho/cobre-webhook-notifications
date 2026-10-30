@@ -210,7 +210,7 @@ class HttpsWebhookSender implements WebhookSender {
 
 	/**
 	 * The delay of a valid {@code Retry-After}, read on a 429 or 503 only. Null when the header is missing, invalid or
-	 * cannot be parsed: the caller then keeps the normal backoff. A past date or 0 is due immediately.
+	 * cannot be parsed, zero, or a date that is not in the future: the caller then keeps the normal backoff (D53, D68).
 	 */
 	private static Duration retryAfter(ClassicHttpResponse response, Instant now) {
 		int status = response.getCode();
@@ -232,7 +232,8 @@ class HttpsWebhookSender implements WebhookSender {
 		String trimmed = value.trim();
 		if (trimmed.matches("[0-9]+")) {
 			try {
-				return Duration.ofSeconds(Long.parseLong(trimmed));
+				Duration delay = Duration.ofSeconds(Long.parseLong(trimmed));
+				return delay.isZero() ? null : delay;
 			}
 			catch (NumberFormatException ex) {
 				return Duration.ofSeconds(Long.MAX_VALUE);
@@ -242,8 +243,8 @@ class HttpsWebhookSender implements WebhookSender {
 		if (at == null) {
 			return null;
 		}
-		// A date at or before now means "due immediately": the same as 0, still through the scheduler.
-		return at.isBefore(now) ? Duration.ZERO : Duration.between(now, at);
+		// A date at or before now is not a wait: the normal backoff applies (D53).
+		return at.isAfter(now) ? Duration.between(now, at) : null;
 	}
 
 	/**
