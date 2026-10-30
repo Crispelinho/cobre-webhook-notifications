@@ -71,7 +71,7 @@ This project was generated with Spring Boot and Gradle.
 
 Evidence of a local run on the delivery dashboard (2026-10-30), with the dead-letter activity:
 
-![Delivery dashboard in Grafana, local run on 2026-10-30](docs/process/evidence/grafana/2026-10-30-grafana/o6-delivery-dashboard.png)
+![Delivery dashboard in Grafana, local run on 2026-10-30](docs/process/evidence/grafana/2026-10-30/o6-delivery-dashboard-overview.png)
 
 ## Installation for local test
 
