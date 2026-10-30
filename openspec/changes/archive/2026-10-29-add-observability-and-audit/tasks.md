@@ -20,3 +20,8 @@
 ## 4. Verification
 
 - [ ] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
+
+## Archive notes (2026-10-29)
+
+- 1.3: not done. PR #13 and `docs/ai-usage/07` list the manual dashboard and alert check with screenshots as pending.
+- 4.1: the build passed before merge according to PR #13 (446 tests). The fresh-context review is recorded as pending.

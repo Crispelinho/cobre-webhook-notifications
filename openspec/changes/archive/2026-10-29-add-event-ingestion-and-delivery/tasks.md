@@ -28,5 +28,10 @@
 
 ## 5. Verification
 
-- [ ] 5.1 `./gradlew build` passes
+- [x] 5.1 `./gradlew build` passes
 - [ ] 5.2 Dual blind AI review (delivery and security change) before the pull request
+
+## Archive notes (2026-10-29)
+
+- 5.1: the build passed before merge according to PR #6 (363 tests).
+- 5.2: not done. PR #6 and `docs/ai-usage/04` record the dual blind AI review as pending, and there is no record that it ran later.

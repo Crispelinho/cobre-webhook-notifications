@@ -2,7 +2,7 @@
 
 Delivers platform events to client webhooks over HTTPS and gives clients a self-service REST API to query and replay their notifications. Built for the Cobre technical challenge.
 
-> **Status:** the five planned changes and the reconciliation changes for the subscription limits, the `Retry-After` cap, processing recovery and signed delivery rules are merged into `develop`. Retrying transient DNS failures is specified and not yet implemented. See the [Roadmap](#roadmap) and the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md).
+> **Status:** the five planned changes and the reconciliation changes for the subscription limits, the `Retry-After` cap, processing recovery, signed delivery rules and transient DNS retries are merged into `develop`. See the [Roadmap](#roadmap) and the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md).
 
 ## What it does
 
@@ -128,15 +128,15 @@ openspec validate --all --strict
 | # | OpenSpec change | Status |
 |---|---|---|
 | 1 | `add-self-service-query` | Merged and archived |
-| 2 | `add-event-ingestion-and-delivery` | Merged (#6); spec still in `openspec/changes/` |
-| 3 | `add-notification-replay` | Merged (#9); spec still in `openspec/changes/` |
+| 2 | `add-event-ingestion-and-delivery` | Merged (#6); archived |
+| 3 | `add-notification-replay` | Merged (#9); archived |
 | 4 | `add-subscription-management` | Merged and archived |
-| 5 | `add-observability-and-audit` | Merged (#13); spec still in `openspec/changes/` |
-| 6 | `add-subscription-limits` | Merged (#19, #29); spec still in `openspec/changes/` |
+| 5 | `add-observability-and-audit` | Merged (#13); archived |
+| 6 | `add-subscription-limits` | Merged (#19, #29); archived |
 | 7 | `add-retry-after-cap` | Merged (#30); spec still in `openspec/changes/` |
-| 8 | `add-processing-recovery` | Merged (#20); spec still in `openspec/changes/` |
-| 9 | `add-signed-delivery-rules` | Merged (tests and receiver documentation; the behaviour already existed); spec still in `openspec/changes/` |
-| 10 | `add-transient-dns-retry` | Specified, not implemented |
+| 8 | `add-processing-recovery` | Merged (#20); archived |
+| 9 | `add-signed-delivery-rules` | Merged (tests and receiver documentation; the behaviour already existed); archived |
+| 10 | `add-transient-dns-retry` | Merged (#32); spec still in `openspec/changes/` |
 
 Changes 6 to 10 come from the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md). Each one is specified in `openspec/changes/` before any code.
 

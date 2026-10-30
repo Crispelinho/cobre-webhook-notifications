@@ -20,3 +20,7 @@
 ## 4. Verification
 
 - [ ] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
+
+## Archive notes (2026-10-29)
+
+- 4.1: the build passed before merge according to PRs #19 (454 tests) and #29. There is no record of a fresh-context AI review for this change.
