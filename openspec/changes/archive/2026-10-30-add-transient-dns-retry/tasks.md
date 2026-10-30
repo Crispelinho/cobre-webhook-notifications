@@ -20,7 +20,7 @@
 
 ## 4. Verification
 
-- [ ] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
+- [x] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
 
 ## Archive notes (2026-10-30)
 
