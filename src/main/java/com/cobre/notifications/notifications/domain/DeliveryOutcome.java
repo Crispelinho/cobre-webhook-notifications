@@ -7,7 +7,7 @@ public enum DeliveryOutcome {
 
 	/** The receiver answered 2xx. */
 	SUCCESS,
-	/** Worth trying again: 5xx, 408, 429, timeouts and connection errors. */
+	/** Worth trying again: 5xx, 408, 429, timeouts, connection errors and DNS resolution failures (D54, D66). */
 	RETRYABLE,
 	/** Retrying cannot help: any other response (redirects included), TLS errors, invalid destinations. */
 	PERMANENT;
