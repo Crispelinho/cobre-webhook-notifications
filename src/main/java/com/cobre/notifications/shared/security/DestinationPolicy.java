@@ -88,12 +88,12 @@ public final class DestinationPolicy {
 		try {
 			List<InetAddress> addresses = resolver.resolve(host);
 			if (addresses == null || addresses.isEmpty()) {
-				throw new RejectedDestinationException("host does not resolve");
+				throw new DestinationResolutionException("host does not resolve");
 			}
 			return List.copyOf(addresses);
 		}
 		catch (UnknownHostException ex) {
-			throw new RejectedDestinationException("host does not resolve");
+			throw new DestinationResolutionException("host does not resolve");
 		}
 	}
 

@@ -169,10 +169,13 @@ class DestinationPolicyTests {
 	}
 
 	@Test
-	void hostThatDoesNotResolveIsRejected() {
+	void hostThatDoesNotResolveIsAResolutionFailureNotAnSsrfRejection() {
+		// A resolution failure may be transient (D54), so it is not a RejectedDestinationException.
 		DestinationPolicy policy = new DestinationPolicy(List.of("gone.example.org"), resolver);
 
-		expectRejected(policy, "https://gone.example.org/", "host does not resolve");
+		assertThatExceptionOfType(DestinationResolutionException.class)
+			.isThrownBy(() -> policy.check("https://gone.example.org/"))
+			.withMessage("host does not resolve");
 	}
 
 	@Test
