@@ -60,6 +60,8 @@ public final class DestinationPolicy implements AutoCloseable {
 
 	private final ExecutorService lookups;
 
+	private final boolean allowAnyHost;
+
 	/** Uses {@link #DEFAULT_RESOLVE_TIMEOUT} and {@link #MAX_CONCURRENT_LOOKUPS}. */
 	public DestinationPolicy(Collection<String> allowedHosts, HostResolver resolver) {
 		this(allowedHosts, resolver, DEFAULT_RESOLVE_TIMEOUT, MAX_CONCURRENT_LOOKUPS);
@@ -76,6 +78,15 @@ public final class DestinationPolicy implements AutoCloseable {
 	 */
 	public DestinationPolicy(Collection<String> allowedHosts, HostResolver resolver, Duration resolveTimeout,
 			int maxConcurrentLookups) {
+		this(allowedHosts, resolver, resolveTimeout, maxConcurrentLookups, false);
+	}
+
+	/**
+	 * @param allowAnyHost when true, every host name passes the allowlist. Only the local profile may set it; the
+	 *     address rule still rejects non-public addresses.
+	 */
+	public DestinationPolicy(Collection<String> allowedHosts, HostResolver resolver, Duration resolveTimeout,
+			int maxConcurrentLookups, boolean allowAnyHost) {
 		Objects.requireNonNull(resolveTimeout);
 		if (resolveTimeout.isNegative() || resolveTimeout.isZero()) {
 			throw new IllegalArgumentException("resolve timeout must be positive");
@@ -92,6 +103,7 @@ public final class DestinationPolicy implements AutoCloseable {
 			.toList();
 		this.resolver = Objects.requireNonNull(resolver);
 		this.resolveTimeout = resolveTimeout;
+		this.allowAnyHost = allowAnyHost;
 	}
 
 	/**
@@ -138,6 +150,9 @@ public final class DestinationPolicy implements AutoCloseable {
 	}
 
 	private boolean isAllowed(String host) {
+		if (allowAnyHost) {
+			return true;
+		}
 		for (String entry : allowedHosts) {
 			if (entry.startsWith(".") ? host.equals(entry.substring(1)) || host.endsWith(entry) : host.equals(entry)) {
 				return true;
