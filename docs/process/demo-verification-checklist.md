@@ -33,10 +33,10 @@ Use a new `event_id` for every ingestion. The seed ids `EVT001` to `EVT010` retu
 | ID | Check | Expected | Observed | Status |
 |---|---|---|---|---|
 | A1 | `POST /events` with `credit_deposit`, `CLIENT001`, `DEMO-A-0001` | `202` | | Not run |
-| A2 | Notification for `SUB-CLIENT001` | `failed`, `last_error` `invalid_destination`, `attempts` 1 | | Not run |
-| A3 | `delivery_attempts` | One row: round 1, attempt 1, `http_status` null, `error_type` `invalid_destination` | | Not run |
-| A4 | Service log | `Destination of notification event <id> rejected: <reason>`. The reason is `host does not resolve` or `host resolves to a non-public address` | | Not run |
-| A5 | Grafana | Outcome `permanent`. `cobre-failed-rate` and `cobre-attempt-failure-rate` firing after 1 min. `cobre-dead-letter` does not move | | Not run |
+| A2 | Notification for `SUB-CLIENT001` | Name does not resolve: `failed`, `last_error` `dns_error`, `attempts` 5. Name resolves to a private address: `failed`, `last_error` `invalid_destination`, `attempts` 1 | | Not run |
+| A3 | `delivery_attempts` | Does not resolve: five rows, `error_type` `dns_error`. Private address: one row, `error_type` `invalid_destination`. `http_status` null in both | | Not run |
+| A4 | Service log | `did not resolve: host does not resolve` (dns_error), or `rejected: host resolves to a non-public address` (invalid_destination) | | Not run |
+| A5 | Grafana | Does not resolve: outcome `retryable` five times, `cobre-dead-letter` moves after the fifth attempt. Private address: outcome `permanent`, `cobre-dead-letter` does not move. `cobre-failed-rate` firing after 1 min in both | | Not run |
 
 ## 3. Scenario B: rejected destinations
 

@@ -169,7 +169,7 @@ Compare with a constant-time function. Reject the request if `t` is more than a 
 | `POST /subscriptions` returns 400 with `url is not an allowed destination` | A rule of the destination policy failed. The API message is deliberately generic | The reason is only in the application log (`Subscription destination rejected: <reason>`). The reasons are: `only https is allowed`, `only port 443 is allowed`, `host is not in the allowlist`, `host does not resolve`, `host resolves to a non-public address`. |
 | Delivery ends in `INVALID_DESTINATION` (one attempt, no retries) | The host was valid when the subscription was created but not when the webhook was sent, because `WEBHOOK_ALLOWED_HOSTS` no longer contains it | Put the host back in `WEBHOOK_ALLOWED_HOSTS`, restart, and replay the notification. The replay keeps the URL stored with the notification, so the subscription does not change. |
 | The tunnel host changed and the old subscription URL is dead | A subscription's URL cannot be changed: `PATCH` accepts only `active` and `event_types` | Create a new subscription with the new host. Deactivate or delete the old one. |
-| Seed subscriptions fail with `INVALID_DESTINATION` | `webhook.example.com` does not resolve | Expected. The seed is for the data model, not for live delivery. |
+| Seed subscriptions fail with `dns_error` (five attempts, then `failed`) if the name does not resolve, or `invalid_destination` (one attempt) if it resolves to a non-public address | `webhook.example.com` does not resolve, or resolves to a private address | Expected. The seed is for the data model, not for live delivery. |
 | Receiver gets no request | The tunnel is not forwarding to port 9000, or the subscription URL has a different host | Open the tunnel's inspector page and check the request log. |
 | Signature check fails | The body was parsed and re-serialized before checking, or the secret is not the one returned on creation | Hash the raw bytes. The secret cannot be recovered: create a new subscription if you lost it. |
 | Startup fails with `Bind for 0.0.0.0:9092 failed: port is already allocated` | Another Compose stack (for example, the main checkout's) or leftover Testcontainers containers hold the port | Do not stop another project's stack. Use the dedicated containers in [Step 3](#step-3-start-the-service-with-that-host-allowed). Check with `docker ps`. |
@@ -426,23 +426,23 @@ Expected: `202`, with one notification for `SUB-CLIENT001`.
 
 **What to check in the database.** After a few seconds:
 
-- `notifications`: `delivery_status` `failed`, `last_error` `invalid_destination`, `attempts` 1, `round` 1.
-- `delivery_attempts`: one row, `round` 1, `attempt_number` 1, `error_type` `invalid_destination`, `http_status` NULL.
+- If the name does not resolve: `notifications` ends `failed` with `last_error` `dns_error` and `attempts` 5, `round` 1. `delivery_attempts` has five rows with `error_type` `dns_error` and `http_status` NULL.
+- If the name resolves to a private address: `notifications` ends `failed` with `last_error` `invalid_destination` and `attempts` 1. `delivery_attempts` has one row with `error_type` `invalid_destination`.
 
-Why: `HttpsWebhookSender.send` turns a `RejectedDestinationException` into `TransportError.INVALID_DESTINATION`, which `DeliveryOutcome.classify` maps to `PERMANENT`. `Delivery` then moves to `FAILED` with that error type, so there are no retries. No request is sent.
+Why: `HttpsWebhookSender.send` handles the two cases differently. A `DestinationResolutionException` (the name does not resolve) becomes `TransportError.DNS`, which is `dns_error`, and `DeliveryOutcome.classify` maps it to `RETRYABLE`, so the round uses its five attempts (decision D54, PR #32). A `RejectedDestinationException` (the name resolves to a non-public address) becomes `INVALID_DESTINATION`, which is `PERMANENT`, with one attempt. In both cases no request is sent.
 
-**What to check in the log.** The service logs `Destination of notification event <id> rejected: <reason>` at WARN. The reason depends on DNS:
+**What to check in the log.** The service logs at WARN `Destination of notification event <id> did not resolve: <reason>` for a DNS failure, or `Destination of notification event <id> rejected: <reason>` for a rejected host. The reason depends on DNS:
 
 - `host does not resolve`: the name has no address record.
-- `host resolves to a non-public address`: the name resolves to a private or reserved address. On the machine where this runbook was written, the local resolver answered `192.168.5.1` for `webhook.example.com`, and a public resolver (`8.8.8.8`) returned no address for it on 2026-10-29. Your result may differ. Both reasons end in `invalid_destination`.
+- `host resolves to a non-public address`: the name resolves to a private or reserved address. On the machine where this runbook was written, the local resolver answered `192.168.5.1` for `webhook.example.com`, and a public resolver (`8.8.8.8`) returned no address for it on 2026-10-29. Your result may differ. The first ends in `dns_error` (retried five times). The second ends in `invalid_destination` (one attempt).
 
 **What to check on the dashboard and in the alert rules.**
 
-- **Delivery attempts per second by outcome**: a series for `permanent` (the lower-case form of `PERMANENT`).
+- **Delivery attempts per second by outcome**: a series for `permanent` if the name resolves to a private address. If it does not resolve, the series is `retryable`, five times per round.
 - **Failed attempt ratio (5 min)**: rises. With few events, one failure is a large share of the window.
 - **Failed notification rate above 5%** (`cobre-failed-rate`): firing after its 1-minute `for` period.
 - **Attempt failure rate including retries above 5%** (`cobre-attempt-failure-rate`): firing after its 1-minute `for` period.
-- **Message reached the dead-letter topic** (`cobre-dead-letter`): should **not** move. Only a `RETRY` outcome throws in `DispatchConsumer`, which sends the message to the retry topics and, after the last one, to the dead-letter topic. A `PERMANENT` outcome does not throw.
+- **Message reached the dead-letter topic** (`cobre-dead-letter`): should **not** move. Only a `RETRY` outcome throws in `DispatchConsumer`, which sends the message to the retry topics and, after the last one, to the dead-letter topic. A `PERMANENT` outcome does not throw. A host that does not resolve gives `RETRYABLE` attempts, so after five of them the message reaches the dead-letter topic, as in Scenario C. Then `cobre-dead-letter` moves for this scenario too.
 - **Oldest unpublished outbox row older than 60 s** (`cobre-outbox-age`): should stay normal.
 
 ### Scenario B: rejected destinations
@@ -580,7 +580,7 @@ For `/fail`, the second run in [Verified run](#verified-run) measured the first 
 
 ### Known gaps for the demo
 
-- **DNS failures.** D66 (`dns_error`, retryable) is recorded in [the decision log](../architecture/decision-log.md) and specified by the change `openspec/changes/add-transient-dns-retry`. The code on `origin/develop` does not implement it: `TransportError` has no `dns_error`, and a DNS failure is `invalid_destination`, permanent, with no retry. Scenario A describes the current behaviour. If that change is merged, Scenario A changes to `dns_error` with five attempts, and this section must be updated.
+- **DNS failures.** `dns_error` is implemented on `origin/develop` (PR #32, decision D54; D66 in [the decision log](../architecture/decision-log.md) names the error type). A name that does not resolve is retried up to five attempts per round, then ends `failed`. A name that resolves to a non-public address is not retried (`invalid_destination`). The real-DNS case was not exercised in the observed run: on the machine where the observed run took place, `webhook.example.com` resolved to a private address. Check the outcome of `dns_error` in the observed run before you rely on it.
 - **Test receiver.** It does not verify signatures (see Scenario C).
 - **Attempt timings.** The configured `demo` delays do not match the gaps of the observed run (+33 s, +129 s, +428 s and +2 077 s between attempts). The cause is not verified. Check the profiles the service started with (Spring logs them at startup) before you rely on any timing.
 - **Grafana access.** The login is not in this repository.
