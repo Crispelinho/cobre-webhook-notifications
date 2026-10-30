@@ -139,6 +139,14 @@ class DeliveryTests {
 			.isThrownBy(() -> AttemptResult.response(SENT, 503, 1, java.time.Duration.ofSeconds(-1)));
 	}
 
+	@Test
+	void aZeroRetryAfterIsRejectedSoItCannotBecomeADelayOfNothing() {
+		assertThatIllegalArgumentException()
+			.isThrownBy(() -> AttemptResult.response(SENT, 429, 1, java.time.Duration.ZERO));
+		assertThatIllegalArgumentException()
+			.isThrownBy(() -> AttemptResult.response(SENT, 503, 1, java.time.Duration.ZERO));
+	}
+
 	/** Round 2, so tests also prove messages are matched against the current round. */
 	private static Delivery delivery(DeliveryStatus status, int attemptsInRound) {
 		return new Delivery(new NotificationEventId("N1"), "E1", "credit_deposit", "content",

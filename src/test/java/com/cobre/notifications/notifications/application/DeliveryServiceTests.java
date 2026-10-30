@@ -146,16 +146,6 @@ class DeliveryServiceTests {
 	}
 
 	@Test
-	void aRetryAfterOfZeroIsHonouredAsDueNow() {
-		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
-		nextResult = AttemptResult.response(NOW, 503, 20, Duration.ZERO);
-
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
-
-		assertThat(store.delay).isEqualTo(Duration.ZERO);
-	}
-
-	@Test
 	void aRetryAfterAboveTheCapSchedulesAtTheCapNeverEarlier() {
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
 		nextResult = AttemptResult.response(NOW, 503, 20, Duration.ofSeconds(86_400));
