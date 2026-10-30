@@ -147,7 +147,27 @@ Check the state of the delivery with the notifications API (`GET /notification_e
   }
   ```
 
-A `2xx` status marks the delivery as completed. Any other status, or a timeout, is retried. A round has five attempts (the first one included). With the `demo` profile the configured delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts. The second run in [Verified run](#verified-run) measured the first three attempts at +0 s, +11 s and +42 s. A later run did not match the configured delays; see [Observed run](#observed-run-2026-10-29). When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
+A `2xx` status marks the delivery as completed. Some other statuses are retried and some are not; see [What the receiver must answer](#what-the-receiver-must-answer). A round has five attempts (the first one included). With the `demo` profile the configured delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts. The second run in [Verified run](#verified-run) measured the first three attempts at +0 s, +11 s and +42 s. A later run did not match the configured delays; see [Observed run](#observed-run-2026-10-29). When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
+
+## What the receiver must answer
+
+The response decides what the service does next. The service reads the status code and, for `429` and `503`, the `Retry-After` header. It discards the body, so the body is not part of the contract. The receiver has `app.delivery.http.request-timeout` (default `PT10S`) to answer.
+
+| The receiver answers | Outcome | Next step |
+|---|---|---|
+| `2xx` (200 to 299) | `SUCCESS` | `completed` |
+| `3xx` | `PERMANENT` | `failed` after one attempt. Redirects are never followed |
+| `408` or `429` | `RETRYABLE` | Next attempt. `429` honours `Retry-After` |
+| `5xx` | `RETRYABLE` | Next attempt |
+| Other `4xx`, for example `400`, `401`, `403`, `404` or `410` | `PERMANENT` | `failed` after one attempt |
+| No response within the request timeout | `TIMEOUT` (retryable) | Next attempt |
+| TLS handshake failure | `PERMANENT` (`tls_error`) | `failed` after one attempt |
+
+`Retry-After` is read on `429` and `503` only. Its value sets the delay before the next attempt, capped at `PT300S` (`retry-after-cap`). When the header is missing or invalid, the scheduled delay applies.
+
+A response that arrives after the timeout counts as a timeout, even if the receiver already processed the request. So the receiver should answer quickly, and it should treat a repeated `Cobre-Notification-Id` as a duplicate.
+
+The demo receivers follow this table: `scripts/test-webhook-receiver.py` answers `500` for paths ending in `/fail` and `200` otherwise. The runner's receiver in `scripts/demo-runner/` does the same and also logs whether the signature verifies.
 
 ## Verifying the signature
 
