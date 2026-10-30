@@ -10,7 +10,7 @@
 - [x] 2.1 Unit tests for `DestinationPolicy`: a resolution failure raises the resolution exception, and a non-public address still raises `RejectedDestinationException`
 - [x] 2.2 Unit test for the outcome classification: `DNS` is `RETRYABLE`
 - [x] 2.3 Sender tests with a fake resolver: failure then success, never resolves (5 attempts, then `failed`), private address (immediate `failed`)
-- [x] 2.4 Acceptance test: registration of a host that does not resolve keeps its current response (not yet added; the validator maps the new exception to the same `400`)
+- [x] 2.4 Acceptance test: registration of a host that does not resolve keeps its current response (the validator maps the new exception to the same `400`)
 
 ## 3. Implementation
 
@@ -21,3 +21,8 @@
 ## 4. Verification
 
 - [ ] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
+
+## Archive notes (2026-10-30)
+
+- Implemented by PR #32. The registration acceptance case for a host that does not resolve was added in #40.
+- 4.1: the build passed in CI on #32. The fresh-context AI review is recorded as pending in #32.
