@@ -56,8 +56,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Sends the webhook with Apache HttpClient 5: HTTPS only, redirects never followed (a {@code 3xx} comes back as a
- * plain status) and a hard TOTAL deadline per attempt (see {@link #send}). The deadline starts once the destination
- * is validated: the name lookup of {@link DestinationPolicy} runs before it and has only the JVM's own timeouts.
+ * plain status) and a hard TOTAL deadline per attempt (see {@link #send}). The name lookup of
+ * {@link DestinationPolicy} has its own deadline (5 s by default) and runs before the attempt deadline starts.
  * Before every attempt the destination goes through the shared {@link DestinationPolicy}: a rejection is an
  * {@code INVALID_DESTINATION} attempt, a name that does not resolve is a {@code DNS} attempt, retried, and no request
  * is sent in either case. The connection goes to the address the policy validated and never to a second DNS answer
