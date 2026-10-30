@@ -12,3 +12,4 @@ AI (Claude Code) was used as a productivity complement. A human approved every d
 | 05 | Change 4: subscription management | [05-change-4-subscriptions.md](05-change-4-subscriptions.md) |
 | 06 | Change 3: notification event replay | [06-change-3-replay.md](06-change-3-replay.md) |
 | 07 | Change 5: observability and audit | [07-change-5-observability-and-audit.md](07-change-5-observability-and-audit.md) |
+| 08 | Fixes after change 5, reconciliation and live verification | [08-post-change-5-fixes-and-live-verification.md](08-post-change-5-fixes-and-live-verification.md) |

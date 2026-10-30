@@ -69,6 +69,10 @@ This project was generated with Spring Boot and Gradle.
 - **Tech stack:** Java 25 · Spring Boot 4.1 · Gradle (Kotlin DSL) · PostgreSQL 18 · Apache Kafka 4 · OpenTelemetry with Grafana LGTM · JUnit 5 · Testcontainers
 - **Observability:** metrics and traces are exported over OTLP to Grafana LGTM, which hosts the dashboards and the alert rules provisioned in `docker/grafana/`.
 
+Evidence of a local run on the delivery dashboard (2026-10-30), with the dead-letter activity:
+
+![Delivery dashboard in Grafana, local run on 2026-10-30](docs/process/evidence/grafana/2026-10-30-grafana/o6-delivery-dashboard.png)
+
 ## Installation for local test
 
 ### Requirements

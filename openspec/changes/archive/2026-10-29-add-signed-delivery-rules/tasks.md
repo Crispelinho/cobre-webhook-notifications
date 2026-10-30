@@ -19,9 +19,9 @@
 
 ## 4. Verification
 
-- [ ] 4.1 `./gradlew build` passes; dual blind AI review (delivery and security change) before the pull request
+- [x] 4.1 `./gradlew build` passes; dual blind AI review (delivery and security change) before the pull request
 
 ## Archive notes (2026-10-29)
 
 - Implemented by PR #31 as tests and receiver documentation; the behaviour already existed.
-- 4.1: the build passed before merge according to PR #31 (528 tests). The dual blind AI review is recorded as pending.
+- 4.1: the build passed before merge according to PR #31 (528 tests). A dual blind AI review of the delivery and security path ran after merge, on `develop` (983f324, 2026-10-30), and covered this change. Round 1 had no critical findings and one real warning (the last retryable attempt of a round left the event `retrying`), fixed in #53 (D70). Rounds 2 to 4 reviewed that fix; round 4 had no critical or real findings. Theoretical findings and suggestions are listed in the #53 description.

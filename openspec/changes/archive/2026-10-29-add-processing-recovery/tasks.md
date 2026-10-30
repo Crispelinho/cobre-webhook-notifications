@@ -21,11 +21,11 @@
 
 ## 4. Verification
 
-- [ ] 4.1 `./gradlew build` passes; dual blind AI review (delivery change) before the pull request
+- [x] 4.1 `./gradlew build` passes; dual blind AI review (delivery change) before the pull request
 
 ## Archive notes (2026-10-29)
 
 - Implemented by PR #20. The replay inputs (2.4, 3.4) were covered by earlier replay code and by `ReplayDeliveryIntegrationTests` (#26).
 - 1.2: not done. There is no `design.md`. The migration took V3 (`V3__add_processing_lease.sql`, D65).
-- 4.1: the build passed before merge according to PR #20 (467 tests). There is no record of the dual blind AI review.
+- 4.1: the build passed before merge according to PR #20 (467 tests). A dual blind AI review of the delivery and security path ran after merge, on `develop` (983f324, 2026-10-30), and covered this change. Round 1 had no critical findings and one real warning (the last retryable attempt of a round left the event `retrying`), fixed in #53 (D70). Rounds 2 to 4 reviewed that fix; round 4 had no critical or real findings. Theoretical findings and suggestions are listed in the #53 description.
 - Gap: the scenario "Lease is not visible in the API" has no test, and "Destination no longer allowed at replay time" is tested at unit level only.
