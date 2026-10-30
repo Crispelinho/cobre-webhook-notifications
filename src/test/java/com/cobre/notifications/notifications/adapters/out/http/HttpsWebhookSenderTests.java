@@ -240,6 +240,24 @@ class HttpsWebhookSenderTests {
 	}
 
 	@Test
+	void aLookupThatTimesOutIsARetryableDnsAttemptAndNothingIsSent() {
+		receiver.stubFor(post("/hook").willReturn(aResponse().withStatus(200)));
+		DestinationPolicy slow = new DestinationPolicy(List.of("hooks.example.org"), host -> {
+			LockSupport.parkNanos(Duration.ofSeconds(30).toNanos());
+			return List.of(InetAddress.getByName(DNS.get(host)));
+		}, Duration.ofMillis(200));
+		HttpsWebhookSender slowSender = new HttpsWebhookSender(trusting, json, slow, cipher, new WebhookSigner(),
+				Duration.ofSeconds(5), Clock.fixed(NOW, ZoneOffset.UTC));
+
+		AttemptResult result = slowSender.send(delivery(url("/hook")));
+
+		assertThat(result.error()).isEqualTo(TransportError.DNS);
+		assertThat(result.httpStatus()).isNull();
+		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.RETRYABLE);
+		assertThat(receiver.getAllServeEvents()).isEmpty();
+	}
+
+	@Test
 	void aDnsFailureThenAResolvedNameDeliversOnTheNextAttempt() {
 		receiver.stubFor(post("/hook").willReturn(aResponse().withStatus(200)));
 		AtomicBoolean resolves = new AtomicBoolean();

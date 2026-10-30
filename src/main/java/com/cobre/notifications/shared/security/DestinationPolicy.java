@@ -10,7 +10,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -29,8 +33,10 @@ import java.util.concurrent.TimeoutException;
  * {@code Host} header.
  * <p>
  * The check waits at most the resolve timeout (5 s by default) for DNS, so a slow resolver cannot hold the caller. The
- * lookup runs on its own virtual thread and is interrupted when the wait ends; a blocking system call may keep that
- * thread a little longer.
+ * lookup runs on a shared pool of platform threads, at most {@link #MAX_CONCURRENT_LOOKUPS} at a time. A blocking system
+ * call pins its thread until the operating system returns, so the lookups never run on virtual threads: a stuck resolver
+ * must not stall the carriers that run every other virtual thread. When the pool is full, the check fails at once as a
+ * resolution failure.
  */
 public final class DestinationPolicy {
 
@@ -38,6 +44,15 @@ public final class DestinationPolicy {
 
 	/** The longest a name lookup may take before the destination counts as a name that does not resolve. */
 	public static final Duration DEFAULT_RESOLVE_TIMEOUT = Duration.ofSeconds(5);
+
+	/**
+	 * Lookups that may run at once. Each one can hold its thread in the operating system until the resolver gives up,
+	 * so this bounds how many threads a resolver outage can take.
+	 */
+	public static final int MAX_CONCURRENT_LOOKUPS = 16;
+
+	private static final ExecutorService LOOKUPS = new ThreadPoolExecutor(0, MAX_CONCURRENT_LOOKUPS, 60, TimeUnit.SECONDS,
+			new SynchronousQueue<>(), Thread.ofPlatform().name("destination-lookup-", 0).daemon(true).factory());
 
 	private final List<String> allowedHosts;
 
@@ -116,12 +131,18 @@ public final class DestinationPolicy {
 	}
 
 	/**
-	 * Runs the lookup on a virtual thread and waits at most the resolve timeout. A lookup that outlives the wait is
-	 * interrupted, but a blocking system call may keep its thread until the operating system gives up.
+	 * Runs the lookup on the shared pool and waits at most the resolve timeout. A lookup that outlives the wait is
+	 * interrupted, but a blocking system call keeps its pool thread until the operating system gives up. A full pool is
+	 * a resolution failure, not a rejection: nothing was sent, so the round may try again.
 	 */
 	private List<InetAddress> lookup(String host) {
 		FutureTask<List<InetAddress>> task = new FutureTask<>(() -> resolver.resolve(host));
-		Thread.ofVirtual().name("destination-lookup").start(task);
+		try {
+			LOOKUPS.execute(task);
+		}
+		catch (RejectedExecutionException ex) {
+			throw new DestinationResolutionException("name resolution is saturated");
+		}
 		try {
 			return task.get(resolveTimeout.toNanos(), TimeUnit.NANOSECONDS);
 		}

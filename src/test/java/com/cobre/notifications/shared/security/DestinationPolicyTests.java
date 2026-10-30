@@ -10,6 +10,7 @@ import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.LockSupport;
 
 import org.junit.jupiter.api.Test;
@@ -197,6 +198,34 @@ class DestinationPolicyTests {
 	}
 
 	@Test
+	void aFullLookupPoolIsAResolutionFailureAtOnce() throws InterruptedException {
+		// The stuck lookups ignore interrupts, like a blocking system call: they keep their pool threads until released.
+		CountDownLatch release = new CountDownLatch(1);
+		HostResolver stuck = host -> {
+			awaitIgnoringInterrupts(release);
+			return List.of(InetAddress.getByName("93.184.215.14"));
+		};
+		DestinationPolicy slow = new DestinationPolicy(List.of("stuck.example.org"), stuck, Duration.ofMillis(100));
+		try {
+			for (int i = 0; i < DestinationPolicy.MAX_CONCURRENT_LOOKUPS; i++) {
+				assertThatExceptionOfType(DestinationResolutionException.class)
+					.isThrownBy(() -> slow.check("https://stuck.example.org/"))
+					.withMessage("name resolution timed out");
+			}
+			DestinationPolicy quick = new DestinationPolicy(List.of("hooks.example.org"), resolver, Duration.ofSeconds(5));
+			long started = System.nanoTime();
+
+			assertThatExceptionOfType(DestinationResolutionException.class)
+				.isThrownBy(() -> quick.check("https://hooks.example.org/"))
+				.withMessage("name resolution is saturated");
+			assertThat(System.nanoTime() - started).isLessThan(Duration.ofSeconds(1).toNanos());
+		}
+		finally {
+			release.countDown();
+		}
+	}
+
+	@Test
 	void anUnexpectedResolverFailureIsAResolutionFailureNotAnSsrfRejection() {
 		HostResolver broken = host -> {
 			throw new IllegalStateException("resolver broke");
@@ -260,6 +289,21 @@ class DestinationPolicyTests {
 
 	private void expectRejected(String url, String reason) {
 		expectRejected(policy, url, reason);
+	}
+
+	private static void awaitIgnoringInterrupts(CountDownLatch latch) {
+		boolean interrupted = false;
+		while (latch.getCount() > 0) {
+			try {
+				latch.await();
+			}
+			catch (InterruptedException ex) {
+				interrupted = true;
+			}
+		}
+		if (interrupted) {
+			Thread.currentThread().interrupt();
+		}
 	}
 
 	private static void expectRejected(DestinationPolicy policy, String url, String reason) {
