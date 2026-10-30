@@ -20,9 +20,9 @@
 
 ## 4. Verification
 
-- [ ] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
+- [x] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
 
 ## Archive notes (2026-10-30)
 
 - Implemented by PR #32. The registration acceptance case for a host that does not resolve was added in #40.
-- 4.1: the build passed in CI on #32. The fresh-context AI review is recorded as pending in #32.
+- 4.1: the build passed in CI on #32 and locally on this change (550 tests, JDK 25). The fresh-context AI review of the DNS change (#38) found no blockers; the review is recorded in #50.
