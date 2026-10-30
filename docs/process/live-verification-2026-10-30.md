@@ -25,7 +25,7 @@ Setting `KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS=1`, as Testcontainers does, removed 
 
 `group.initial.rebalance.delay.ms=0` alone did not change the result. The churn appeared with the delay at 0 and with the default delay.
 
-Proposed fix, not applied: add `KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: '1'` to the `kafka` service in `compose.yaml`. This setting is for local development only. A production broker needs a partition count that matches the cluster.
+Applied in `compose.yaml` (commit `1be4421`): the `kafka` service sets one offsets partition and no initial rebalance delay, with the full broker block. Setting only `KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS` makes the broker fail at startup, so the whole block is needed. With the repo's compose file, on host port 29092 (remapped only because another stack holds 9092 and 19092), the run gave 0 coordinator errors and 12 rejoins in three minutes. The setting is for local development only. A production broker needs a partition count that matches the cluster.
 
 ## Not verified
 
