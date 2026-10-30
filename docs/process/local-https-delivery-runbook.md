@@ -641,6 +641,12 @@ Not verified, and needed to close this run:
 - Which two subscriptions were deactivated at 22:11:46, and whether one of them is the subscription outside the test.
 - The cause of the HikariPool warnings.
 
+## Explaining the allowlist in the demo
+
+- `WEBHOOK_ALLOWED_HOSTS` is a development and demo control. It shows the policy working. It is not how production routes to client URLs: that would need per-client ownership verification, proposed in [destination-ownership-proposal.md](../architecture/destination-ownership-proposal.md).
+- A host that is not on the list is refused at registration with a generic `400`. The reason is only in the service log, so a caller cannot learn which hosts are listed.
+- `*` is not a wildcard. The list is matched exactly, so `*` matches nothing and every destination is refused. Permitting every host would turn the service into a relay for event content, and the runbook does not offer that option.
+
 ## What this runbook does not cover
 
 - Real DNS rebinding. The destination policy is unit-tested with a fake resolver, not against a live DNS change.
