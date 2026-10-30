@@ -133,8 +133,9 @@ public final class DestinationPolicy {
 			if (ex.getCause() instanceof UnknownHostException) {
 				throw new DestinationResolutionException("host does not resolve");
 			}
-			if (ex.getCause() instanceof RuntimeException runtime) {
-				throw runtime;
+			if (ex.getCause() instanceof RuntimeException) {
+				// An unexpected resolver failure is still a failed lookup: nothing was sent, so the round may try again.
+				throw new DestinationResolutionException("name resolution failed");
 			}
 			throw new IllegalStateException("Destination lookup failed", ex.getCause());
 		}
