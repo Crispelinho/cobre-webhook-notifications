@@ -146,7 +146,7 @@ Check the state of the delivery with the notifications API (`GET /notification_e
   }
   ```
 
-A `2xx` status marks the delivery as completed. Any other status, or a timeout, is retried. A round has five attempts (the first one included). With the `demo` profile the scheduled delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts; the first three attempts were measured at +0 s, +11 s and +42 s. When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
+A `2xx` status marks the delivery as completed. Any other status, or a timeout, is retried. A round has five attempts (the first one included). With the `demo` profile the configured delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts. The second run in [Verified run](#verified-run) measured the first three attempts at +0 s, +11 s and +42 s. A later run did not match the configured delays; see [Observed run](#observed-run-2026-10-29). When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
 
 ## Verifying the signature
 
@@ -222,7 +222,116 @@ Third run, on `develop` at `ed41543` (the code this branch is based on), with th
 
 The first run of this branch on the older base had shown the same behaviour. This run is the one that matches the code on `develop`.
 
-Not exercised: ngrok (not installed on the test machine), the public-address rule against real DNS, and the exact timestamps of the fourth and fifth attempts (only their count was measured).
+Not exercised: ngrok (not installed on the test machine), the public-address rule against real DNS, and the exact timestamps of the fourth and fifth attempts in that run (only their count was measured; the [observed run](#observed-run-2026-10-29) has them).
+
+## API reference
+
+Every endpoint needs `Authorization: Bearer <token>`. Each route declares the scope it needs (`SecurityConfig`). Errors use the RFC 9457 `ProblemDetail` format. A token with the wrong scope gets `403` with `WWW-Authenticate: Bearer error="insufficient_scope"`. That is why a producer token on `/subscriptions` answers `403`, not `401`: the signature was accepted (observed).
+
+| Method and path | Scope | Success | Other responses |
+|---|---|---|---|
+| `POST /events` | `events:write` | `202` | `409` if `event_id` exists; `403` wrong scope |
+| `POST /subscriptions` | `subscriptions:write` | `201` | `400` generic destination message; `403` wrong scope |
+| `GET /subscriptions` | `subscriptions:read` | `200` | `429` after 100 requests per minute |
+| `GET /subscriptions/{subscription_id}` | `subscriptions:read` | `200` | `404` `Subscription not found.` |
+| `PATCH /subscriptions/{subscription_id}` | `subscriptions:write` | `200` | `404` |
+| `DELETE /subscriptions/{subscription_id}` | `subscriptions:write` | `204` | `404` |
+| `GET /notification_events` | `notifications:read` | `200` | `400` invalid filter or paging; `429` |
+| `GET /notification_events/{notification_event_id}` | `notifications:read` | `200` | `404` `Notification event not found.` |
+| `POST /notification_events/{notification_event_id}/replay` | `notifications:replay` | `202` | `404`; `409` `Only a failed notification event can be replayed.` |
+
+The `404` for a notification of another client has the same text as a missing one, so an id cannot be used to probe other clients.
+
+### `POST /events`
+
+Request:
+
+```json
+{"event_id": "DEMO-C-0001", "client_id": "CLIENT001", "event_type": "payment_created", "content": "{\"amount\": 100}"}
+```
+
+Response `202`:
+
+```json
+{"event_id": "DEMO-C-0001", "notification_event_ids": ["<id>", "<id>"]}
+```
+
+The service creates one notification per **active** subscription of `client_id` whose `event_types` contain `event_type`. The observed run got three ids, because an active subscription outside the test also matched (see [Observed run](#observed-run-2026-10-29)). Check the list of active subscriptions before each test.
+
+`event_id` is unique across all clients. A second call with the same id gives `409` and `An event with this event_id already exists.` (observed). The `client_id` names the client the event is about. Authorization rests on the producer scope, so a client token cannot ingest.
+
+### `POST /subscriptions`
+
+Request: `{"url": "https://<host>/<path>", "event_types": ["payment_created"]}`. The URL goes through the destination policy ([Scenario B](#scenario-b-rejected-destinations)).
+
+Response `201`, with a `Location` header `/subscriptions/<subscription_id>`:
+
+```json
+{"subscription_id": "<id>", "url": "https://<host>/<path>", "event_types": ["payment_created"], "active": true, "created_at": "<instant>", "secret": "whsec_..."}
+```
+
+`secret` is returned **only in this response** (the `CreatedSubscriptionResponse` type). Save it. The later reads do not have it.
+
+### `GET /subscriptions`
+
+Response `200`:
+
+```json
+{"data": [{"subscription_id": "<id>", "url": "...", "event_types": ["..."], "active": true, "created_at": "<instant>"}]}
+```
+
+There is no pagination: the response holds every subscription of the client. No `secret`. Not verified: whether inactive subscriptions are included.
+
+### `GET /subscriptions/{subscription_id}`
+
+Response `200` with one subscription (same fields as the list, no `secret`). `404` with `Subscription not found.` if the id is unknown.
+
+### `PATCH /subscriptions/{subscription_id}`
+
+Request: `{"active": false}`, or `{"event_types": ["..."]}`, or both. At least one field is needed. The `url` cannot change. Response `200` with the subscription. `404` if the id is unknown.
+
+### `DELETE /subscriptions/{subscription_id}`
+
+Response `204`, no body. It calls the deactivate use case, so the subscription stops receiving events. Use it as the cleanup step. The `active: false` form of `PATCH` does the same job.
+
+### `GET /notification_events`
+
+Query parameters:
+
+| Name | Default | Notes |
+|---|---|---|
+| `delivery_status` | none | `pending`, `retrying`, `completed` or `failed` |
+| `created_from`, `created_to` | none | Format not verified in this run |
+| `page` | `0` | Starts at 0 |
+| `size` | `20` | Maximum 100 |
+
+Response `200`:
+
+```json
+{"data": [{"notification_event_id": "<id>", "event_id": "...", "event_type": "...", "content": "...", "delivery_status": "failed", "created_at": "<instant>", "delivery_date": null, "delivered_at": null}], "page": 0, "size": 20, "total_elements": 0, "total_pages": 0}
+```
+
+To read every page, request `page` from 0 to `total_pages - 1`. Only the notifications of the token's client come back.
+
+### `GET /notification_events/{notification_event_id}`
+
+Response `200`: the same fields as the list, plus `attempts`, one object per attempt:
+
+```json
+{"round": 1, "attempt_number": 1, "attempted_at": "<instant>", "http_status": 200, "error_type": null, "latency_ms": 120}
+```
+
+`http_status` is null when there was no response, and `error_type` is set then (`invalid_destination`, `timeout`, and so on).
+
+### `POST /notification_events/{notification_event_id}/replay`
+
+Response `202`:
+
+```json
+{"notification_event_id": "<id>", "round": 2, "delivery_status": "pending"}
+```
+
+Only a `failed` notification can be replayed. Any other status gives `409` with `Only a failed notification event can be replayed.`, and the audit log records outcome `REJECTED` (observed five times in the observed run). A replay reuses the URL stored with the notification, so changing the subscription does not change a replay.
 
 ## Demo scenarios
 
@@ -302,7 +411,7 @@ The dead-letter counter also moves for reasons unrelated to the demo, so take a 
 
 ### Scenario A: failures without a tunnel
 
-**Why it fails.** The seed subscription `SUB-CLIENT001` accepts three event types: `credit_card_payment`, `debit_card_withdrawal` and `credit_deposit` (`src/main/resources/seed/notification_events.json`, `EVT001`, `EVT002` and `EVT007`). Its URL is `https://webhook.example.com/CLIENT001`. The seeder inserts this row directly, not through `POST /subscriptions`, so the policy never checks it at registration. The policy checks it at delivery time, and the `local` profile allows `webhook.example.com` by default.
+**Why it fails.** The seed subscription `SUB-CLIENT001` accepts four event types, the ones of CLIENT001's seed events: `credit_card_payment` (`EVT001`), `debit_card_withdrawal` (`EVT002`), `credit_deposit` (`EVT007`) and `debit_subscription` (`EVT010`) (`src/main/resources/seed/notification_events.json`). `SampleDataSeeder` builds that list from the events, one set per client. The list was read from the database of the main checkout on 2026-10-29; check it again if the seed changes. Its URL is `https://webhook.example.com/CLIENT001`. The seeder inserts this row directly, not through `POST /subscriptions`, so the policy never checks it at registration. The policy checks it at delivery time, and the `local` profile allows `webhook.example.com` by default.
 
 **Action.** Keep `WEBHOOK_ALLOWED_HOSTS` unset:
 
@@ -425,14 +534,14 @@ Expected: `202`, with two notification event ids, one per subscription.
 | `/ok` | `/ok 200 <n>` once | `completed`, `delivered_at` set | 1 (`http_status` 200, `delivery_attempts` round 1) |
 | `/fail` | `/fail 500 <n>` five times | `failed`, `last_error` `retries_exhausted` | 5 (`attempt_number` 1 to 5, `http_status` 500) |
 
-For `/fail`, the first three attempts were measured in the verified run above at about +0 s, +11 s and +42 s. The fourth and fifth attempts follow the configured delays of 1 min and 2 min; this runbook does not measure them. The whole sequence takes about four minutes. `last_error` is `retries_exhausted` because a `500` response has no transport error type (`Delivery`).
+For `/fail`, the second run in [Verified run](#verified-run) measured the first three attempts at about +0 s, +11 s and +42 s. A later run measured all five at +0 s, +33 s, +161 s, +590 s and +2 667 s (44 minutes), which does not match the configured delays; see [Observed run](#observed-run-2026-10-29). The sequence does not take four minutes, as an earlier estimate in this section said. Plan for up to 45 minutes, and read the real times from `delivery_attempts.attempted_at`. `last_error` is `retries_exhausted` because a `500` response has no transport error type (`Delivery`).
 
 **Grafana while C runs:**
 
 - **Delivery attempts per second by outcome**: `success` for `/ok`, `retryable` for `/fail` (a `500` is `RETRYABLE` in `DeliveryOutcome.classify`).
 - **Attempt failure rate including retries above 5%** (`cobre-attempt-failure-rate`): firing if the window holds only these attempts, because five of six are not `success`. Scenario A's attempt is also in the window if it ran recently.
 - **Failed notification rate above 5%** (`cobre-failed-rate`): firing once `/fail` ends as `failed`.
-- **Message reached the dead-letter topic**: should not move. Compare with the baseline.
+- **Message reached the dead-letter topic**: rises by one. The fifth attempt is `RETRYABLE`, and the message then goes to the dead-letter topic. The observed run logged it at ERROR (`Sending to DLT`). Compare with the baseline. `cobre-dead-letter` fires for two minutes after that.
 
 ### Verification in Grafana
 
@@ -473,8 +582,46 @@ For `/fail`, the first three attempts were measured in the verified run above at
 
 - **DNS failures.** D66 (`dns_error`, retryable) is recorded in [the decision log](../architecture/decision-log.md) and specified by the change `openspec/changes/add-transient-dns-retry`. The code on `origin/develop` does not implement it: `TransportError` has no `dns_error`, and a DNS failure is `invalid_destination`, permanent, with no retry. Scenario A describes the current behaviour. If that change is merged, Scenario A changes to `dns_error` with five attempts, and this section must be updated.
 - **Test receiver.** It does not verify signatures (see Scenario C).
-- **Attempt timings.** The fourth and fifth attempts of `/fail` are not measured.
+- **Attempt timings.** The configured `demo` delays do not match the gaps of the observed run (+33 s, +129 s, +428 s and +2 077 s between attempts). The cause is not verified. Check the profiles the service started with (Spring logs them at startup) before you rely on any timing.
 - **Grafana access.** The login is not in this repository.
+
+## Observed run, 2026-10-29
+
+A console log of the service, started from the main checkout (`cobre-webhook-notifications`, branch `develop`) on port 8081, with the tunnel host in `WEBHOOK_ALLOWED_HOSTS`. That checkout had one uncommitted change in `src/main/resources/application.yaml` that this run did not inspect. The pasted log did not include the startup profile line, so whether `demo` was active is not verified. Times are local (UTC−05:00); UTC is five hours ahead.
+
+| Local time | What the log shows | Meaning |
+|---|---|---|
+| 21:19:49 | `01a18a9b-3031…` rejected with `host is not in the allowlist`, attempt 1 `PERMANENT`. `01a18a9b-3032…` attempt 1 `SUCCESS` | Events of the first test. Not identified in the paste |
+| 21:32:58 to 21:46:14 | Five `notification_event.replay` audit lines for `01a18a9b-3032…`, outcome `rejected` | Replays of a `completed` notification, answered `409` |
+| 21:47:55 | `subscription.create` for `01a18ab4-ebb1-791c-8c80-55b0813005dd`, `success` | The `/fail` subscription |
+| 21:54:09.785 | `01a18aba-a19a-7f23-93c0-c6c648cc44ec` rejected with `host is not in the allowlist`, attempt 1 `PERMANENT` | An active subscription outside the test. It received `DEMO-C-0001` too |
+| 21:54:10.163 | `01a18aba-a19b-7751-a981-e9f48ab9afe1`, attempt 1 `SUCCESS` | The `/ok` subscription |
+| 21:54:10.264 | `01a18aba-a19b-743c-91e1-bf7a93ad6983`, attempt 1 `RETRYABLE` | The `/fail` subscription |
+| 21:54:42.970 | Attempt 2, `RETRYABLE` (+32.7 s) | |
+| 21:56:51.653 | Attempt 3, `RETRYABLE` (+128.7 s after attempt 2) | |
+| 22:00:10.864 | `replayed: round 2` for `01a18aba-a19a…`, audit `success`. Round 2, attempt 1 `PERMANENT` at 22:00:11.161 | The replay returned `202`. The host was still not allowlisted, so the attempt failed |
+| 22:04:00.121 | Attempt 4, `RETRYABLE` (+428.5 s after attempt 3) | |
+| 22:11:46 | Two `subscription.deactivate` audit lines, `success` (`01a18823-2854…` and `01a18823-26d4…`) | Cleanup of two subscriptions. Which ones is not confirmed |
+| 22:16:28 and 22:16:33 | WARN from `HikariPool-1`: `Failed to validate connection … (This connection has been closed.)` | Cause not explained. No attempt in the log is affected |
+| 22:38:37.559 | Attempt 5, `RETRYABLE` (+2 077.4 s after attempt 4). Retry topic `notification.dispatch-retry-3` | Attempt 5 did happen. It came 34 minutes after attempt 4 |
+| 22:38:37.567 | ERROR: the message is sent to `notification.dispatch-dlt`, with a full stack trace | Dead-letter path, after the last attempt |
+| 22:38:37.801 | ERROR: `Notification event 01a18aba-a19b-743c-91e1-bf7a93ad6983 round 1 failed: retries exhausted` | `failed` with `retries_exhausted`, as the code path defines it. The database was not queried |
+
+What this run shows:
+
+- **Attempts 1 to 5 all happened.** The attempt that looked missing was only late: 34 minutes after attempt 4, not 12. The round took 44 minutes and 27 seconds from attempt 1 to attempt 5.
+- **The gaps do not match the configured `demo` delays** of `PT10S`, `PT30S`, `PT1M` and `PT2M`. The gaps were 32.7 s, 128.7 s, 428.5 s and 2 077.4 s, which grow about four times each step. That resembles the default backoff (30 s, multiplier 4, in `application.yaml`) more than the demo one, but it does not match exactly: 428.5 s is less than the 480 s the default gives. This is a hypothesis. The startup profile line will confirm or reject it.
+- **Scenario C reaches the dead-letter topic.** A `/fail` round ends in the dead-letter topic after its fifth attempt, so `cobre-dead-letter` should fire. The earlier expectation in this runbook, that it would not move, was wrong for `/fail`.
+- **Fan-out is not isolated.** An active subscription that was not part of the test received `DEMO-C-0001`. Check active subscriptions before a demo.
+
+Not verified, and needed to close this run:
+
+- The number of `/fail 500` lines in the receiver window. The paste did not include it.
+- The state of the `/fail` notification in the database (`failed`, `retries_exhausted`, five attempts). The log says it, but no query confirmed it.
+- Grafana: `notification_dead_letter_total` and the four alert rules after this run.
+- The startup profile line of this run.
+- Which two subscriptions were deactivated at 22:11:46, and whether one of them is the subscription outside the test.
+- The cause of the HikariPool warnings.
 
 ## What this runbook does not cover
 
