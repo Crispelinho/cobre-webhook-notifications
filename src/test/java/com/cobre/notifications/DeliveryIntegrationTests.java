@@ -172,27 +172,31 @@ class DeliveryIntegrationTests {
 
 	@Test
 	void aRetryAfterAboveTheCapIsScheduledAtTheCapAndNotAnHourLater() throws Exception {
-		receiver.stubFor(post("/over-cap").inScenario("over-cap")
+		assertRetryAfterAboveTheCapIsHonoured("/over-cap", 429);
+	}
+
+	@Test
+	void aServiceUnavailableRetryAfterAboveTheCapIsScheduledAtTheCapAndNotAnHourLater() throws Exception {
+		assertRetryAfterAboveTheCapIsHonoured("/overloaded", 503);
+	}
+
+	private void assertRetryAfterAboveTheCapIsHonoured(String path, int status) throws Exception {
+		receiver.stubFor(post(path).inScenario(path)
 			.whenScenarioStateIs(com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED)
-			.willReturn(aResponse().withStatus(429).withHeader("Retry-After", "3600"))
+			.willReturn(aResponse().withStatus(status).withHeader("Retry-After", "3600"))
 			.willSetStateTo("recovered"));
-		receiver.stubFor(post("/over-cap").inScenario("over-cap")
+		receiver.stubFor(post(path).inScenario(path)
 			.whenScenarioStateIs("recovered")
 			.willReturn(aResponse().withStatus(200)));
 
-		String id = ingestFor("/over-cap");
-		// The cap is 3 s (see @SpringBootTest), so the retry must arrive within the await, not after an hour.
+		String id = ingestFor(path);
+		// The cap is 3 s (see @SpringBootTest): the retry must arrive well before an hour, and never before the cap.
 		awaitStatus(id, "completed");
 
-		assertThat(attempts(id)).extracting(a -> a.get("http_status")).containsExactly(429, 200);
-		List<java.time.Instant> times = jdbc.sql("SELECT attempted_at FROM delivery_attempts "
-				+ "WHERE notification_id = :id ORDER BY attempt_number")
-			.param("id", id)
-			.query(java.time.Instant.class)
-			.list();
-		Duration gap = Duration.between(times.get(0), times.get(1));
-		assertThat(gap).isGreaterThanOrEqualTo(Duration.ofSeconds(3));
-		assertThat(gap).isLessThan(Duration.ofSeconds(30));
+		assertThat(attempts(id)).extracting(a -> a.get("http_status")).containsExactly(status, 200);
+		// The receiver's own request log decides the gap, not the timestamps the application stored.
+		assertThat(gapsBetweenRequests(path)).singleElement()
+			.satisfies(gap -> assertThat(gap).isBetween(Duration.ofSeconds(3), Duration.ofSeconds(30)));
 	}
 
 	@Test
@@ -433,6 +437,24 @@ class DeliveryIntegrationTests {
 			.param("id", id)
 			.query()
 			.singleRow();
+	}
+
+	/**
+	 * Time between consecutive requests to {@code path} as the receiver logged them. The receiver's own clock decides
+	 * whether an attempt came too early.
+	 */
+	private static List<Duration> gapsBetweenRequests(String path) {
+		List<java.time.Instant> received = receiver.getAllServeEvents()
+			.stream()
+			.filter(event -> path.equals(event.getRequest().getUrl()))
+			.map(event -> event.getRequest().getLoggedDate().toInstant())
+			.sorted()
+			.toList();
+		List<Duration> gaps = new ArrayList<>();
+		for (int i = 1; i < received.size(); i++) {
+			gaps.add(Duration.between(received.get(i - 1), received.get(i)));
+		}
+		return gaps;
 	}
 
 	private List<Map<String, Object>> attempts(String id) {
