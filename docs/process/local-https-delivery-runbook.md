@@ -90,7 +90,7 @@ DEMO_WEBHOOK_SECRET=whsec_<throwaway value>
 
 Prefix an entry with `.` only if you want its subdomains too: `.ngrok-free.app` would allow every ngrok host. For a demo, the exact host is the safer choice.
 
-To see retries quickly, add `SPRING_PROFILES_ACTIVE=local,demo`. The `demo` profile uses the delays `PT10S,PT30S,PT1M,PT2M` instead of the 30 s to 1 h backoff.
+To see retries quickly, the `local` profile sets the retry delays to `PT10S,PT30S,PT1M,PT2M` instead of the 30 s to 1 h backoff. The `demo` profile no longer exists: it was removed, and its delays are now defined in `local` in the main checkout (not yet on `develop`).
 
 If `docker compose` cannot bind the fixed host port `9092` for Kafka (PostgreSQL is published without a fixed host port in `compose.yaml`, so its host port is random; find it with `docker compose port postgres 5432`), another Compose stack already holds them. This happens when two checkouts run the stack at the same time. Do not stop the other stack; start your own containers on free ports and point the app at them:
 
@@ -147,7 +147,7 @@ Check the state of the delivery with the notifications API (`GET /notification_e
   }
   ```
 
-A `2xx` status marks the delivery as completed. Some other statuses are retried and some are not; see [What the receiver must answer](#what-the-receiver-must-answer). A round has five attempts (the first one included). With the `demo` profile the configured delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts. The second run in [Verified run](#verified-run) measured the first three attempts at +0 s, +11 s and +42 s. A later run did not match the configured delays; see [Observed run](#observed-run-2026-10-29). When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
+A `2xx` status marks the delivery as completed. Some other statuses are retried and some are not; see [What the receiver must answer](#what-the-receiver-must-answer). A round has five attempts (the first one included). With the delays set in `local` the configured delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts. The second run in [Verified run](#verified-run) measured the first three attempts at +0 s, +11 s and +42 s. A later run did not match the configured delays; see [Observed run](#observed-run-2026-10-29). When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
 
 ## What the receiver must answer
 
@@ -213,7 +213,7 @@ Run on 2026-10-29 with `cloudflared` (quick tunnel), the `local` profile on port
 | Host not in the allowlist | `400`, generic message; reason `host is not in the allowlist` in the log |
 | `https://127.0.0.1/...` | `400`, generic message; reason `host is not in the allowlist` in the log |
 
-Second run on the same day, with the `local,demo` profiles, a failing receiver path (`/fail` answers `500`) and a second tunnel:
+Second run on the same day, with the `local,demo` profiles (the `demo` profile was removed afterwards), a failing receiver path (`/fail` answers `500`) and a second tunnel:
 
 | Step | Result |
 |---|---|
@@ -533,12 +533,12 @@ Copy the host, without `https://`. You need it in the next steps.
 **C2. Restart the service with the tunnel host allowed.** Stop the Scenario A/B service with Ctrl+C. In the **Service** console, which already has `WEBHOOK_ALLOWED_HOSTS`, set the profile and the seed secret, then start:
 
 ```powershell
-set SPRING_PROFILES_ACTIVE=local,demo
+set SPRING_PROFILES_ACTIVE=local
 set DEMO_WEBHOOK_SECRET=whsec_<the same value as before>
 gradlew.bat bootRun
 ```
 
-The `demo` profile sets the retry delays to `PT10S,PT30S,PT1M,PT2M` (`application-demo.yaml`).
+The `local` profile sets the retry delays to `PT10S,PT30S,PT1M,PT2M` (`app.delivery.retry.delays`). The `demo` profile and `application-demo.yaml` were removed.
 
 **C3. Create two subscriptions.** Use the host from C1:
 
@@ -618,7 +618,7 @@ For `/fail`, the second run in [Verified run](#verified-run) measured the first 
 
 - **DNS failures.** `dns_error` is implemented on `origin/develop` (PR #32, decision D54; D66 in [the decision log](../architecture/decision-log.md) names the error type). A name that does not resolve is retried up to five attempts per round, then ends `failed`. A name that resolves to a non-public address is not retried (`invalid_destination`). The real-DNS case was not exercised in the observed run: on the machine where the observed run took place, `webhook.example.com` resolved to a private address. Check the outcome of `dns_error` in the observed run before you rely on it.
 - **Test receiver.** It does not verify signatures (see Scenario C).
-- **Attempt timings.** The configured `demo` delays do not match the gaps of the observed run (+33 s, +129 s, +428 s and +2 077 s between attempts). The cause is not verified. Check the profiles the service started with (Spring logs them at startup) before you rely on any timing.
+- **Attempt timings.** The configured delays `PT10S,PT30S,PT1M,PT2M` do not match the gaps of the observed run (+33 s, +129 s, +428 s and +2 077 s between attempts). The cause is not verified. Check the profiles the service started with (Spring logs them at startup) before you rely on any timing.
 - **Grafana access.** The login is not in this repository.
 
 ## Observed run, 2026-10-29
@@ -646,7 +646,7 @@ A console log of the service, started from the main checkout (`cobre-webhook-not
 What this run shows:
 
 - **Attempts 1 to 5 all happened.** Attempt 5 came 34 minutes after attempt 4. An earlier estimate of 12 minutes was wrong. The round took 44 minutes and 27 seconds from attempt 1 to attempt 5. The gap before attempt 5 is **not confirmed**: the run did not explain it, and it must not be read as normal behaviour.
-- **The gaps do not match the configured delays.** The configuration (`DispatchRetryConfiguration`, `application.yaml`) works as follows. With `app.delivery.retry.delays` set, which the `demo` profile does, each retry topic uses one fixed delay: `PT10S`, `PT30S`, `PT1M` and `PT2M`. Without it, the default is exponential backoff from `PT30S` with multiplier 4, about 30 s, 120 s, 480 s and 1 920 s, and each topic keeps one jitter value of up to `PT5S`, drawn once at startup. The observed gaps were 32.7 s, 128.7 s, 428.5 s and 2 077.4 s. The first fits the default; the second is above its band and the third is below it, so neither profile reproduces the run. The cause is not confirmed. The startup profile line and the retry-topic consumer logs would settle it.
+- **The gaps do not match the configured delays.** The configuration (`DispatchRetryConfiguration`, `application.yaml`) works as follows. With `app.delivery.retry.delays` set, which the `local` profile does now (the `demo` profile was removed), each retry topic uses one fixed delay: `PT10S`, `PT30S`, `PT1M` and `PT2M`. Without it, the default is exponential backoff from `PT30S` with multiplier 4, about 30 s, 120 s, 480 s and 1 920 s, and each topic keeps one jitter value of up to `PT5S`, drawn once at startup. The observed gaps were 32.7 s, 128.7 s, 428.5 s and 2 077.4 s. The first fits the default; the second is above its band and the third is below it, so neither profile reproduces the run. The cause is not confirmed. The startup profile line and the retry-topic consumer logs would settle it.
 - **Scenario C reaches the dead-letter topic.** A `/fail` round ends in the dead-letter topic after its fifth attempt, so `cobre-dead-letter` should fire. The earlier expectation in this runbook, that it would not move, was wrong for `/fail`.
 - **Fan-out is not isolated.** An active subscription that was not part of the test received `DEMO-C-0001`. Check active subscriptions before a demo.
 

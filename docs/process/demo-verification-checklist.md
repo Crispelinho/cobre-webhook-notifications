@@ -14,7 +14,7 @@ Use a new `event_id` for every ingestion. The seed ids `EVT001` to `EVT010` retu
 
 - [ ] The database and Kafka are the ones the service uses. Record the JDBC URL and `spring.kafka.bootstrap-servers` from the run configuration.
 - [ ] Flyway applied V1 to V4: `select version from flyway_schema_history order by installed_rank`.
-- [ ] The service started with the intended profile (`local` or `local,demo`) and `DEMO_WEBHOOK_SECRET` set. The log shows `Sample data loaded: 10 notification events, 3 seed subscriptions`. Record the profile line Spring logs at startup, because the retry timings depend on it (see [Observed run](local-https-delivery-runbook.md#observed-run-2026-10-29)).
+- [ ] The service started with the intended profile (`local`) and `DEMO_WEBHOOK_SECRET` set. The log shows `Sample data loaded: 10 notification events, 3 seed subscriptions`. Record the profile line Spring logs at startup, because the retry timings depend on it (see [Observed run](local-https-delivery-runbook.md#observed-run-2026-10-29)).
 - [ ] `WEBHOOK_ALLOWED_HOSTS` matches the scenario: the default for A and B, the tunnel host for C. Record the exact value.
 - [ ] `CLIENT_TOKEN` and `PRODUCER_TOKEN` were generated with `./gradlew devToken` from the directory the service reads its `public.pem` from. A `403` (not `401`) on a producer token used on `/subscriptions` shows that the signature was accepted.
 - [ ] Baseline recorded: notifications by `delivery_status`, the Grafana values, and the state of the four alert rules.
@@ -57,7 +57,7 @@ Run B1 to B5 before Scenario C, while `WEBHOOK_ALLOWED_HOSTS` is still the defau
 | ID | Check | Expected | Observed | Status |
 |---|---|---|---|---|
 | C1 | `start-local-webhook-tunnel.bat` prints the host | `WEBHOOK_ALLOWED_HOSTS=<host>.trycloudflare.com` | Printed in the console | Observed |
-| C2 | Service restarted with the tunnel host and `local,demo` | Starts, with the tunnel host as the allowlist | Subscriptions were accepted with the tunnel host (C3). Profile line not recorded | Partly observed |
+| C2 | Service restarted with the tunnel host and `local` | Starts, with the tunnel host as the allowlist | Subscriptions were accepted with the tunnel host (C3). Profile line not recorded | Partly observed |
 | C3 | `POST /subscriptions` for `/ok` and `/fail`, both `payment_created` | `201` each, secret returned once | `201` for both. The `/fail` creation is audited as `subscription.create`, `success`, at 21:47:55 | Observed |
 | C4 | `POST /events` with `payment_created`, `CLIENT001`, `DEMO-C-0001` | `202` with one notification id per active matching subscription (two, if no other subscription of CLIENT001 is active) | `202` with three ids. One subscription outside the test also matched | Observed |
 | C5 | `/ok` notification | `completed`, one attempt, `http_status` 200 | Log: attempt 1 `SUCCESS` at 21:54:10.163. Database not queried | Partly observed |
@@ -66,7 +66,7 @@ Run B1 to B5 before Scenario C, while `WEBHOOK_ALLOWED_HOSTS` is still the defau
 | C8 | `/fail` receiver lines | `/fail 500 <n>` five times | Not recorded | Not run |
 | C9 | `/fail` final status | `failed`, `last_error` `http_500` | Database: `failed`, 5 attempts, `last_error` `http_500` (2026-10-30). Log: `round 1 failed: retries exhausted` at 22:38:37.801 | Observed |
 | C10 | Dead-letter topic | `Sending to DLT` once, after attempt 5. `cobre-dead-letter` fires for 2 min | Logged at ERROR at 22:38:37.567. Grafana not checked | Partly observed |
-| C11 | Timing of `/fail` | Gaps follow the configured `demo` delays: `PT10S`, `PT30S`, `PT1M`, `PT2M` | Gaps of 32.7 s, 128.7 s, 428.5 s and 2 077.4 s. They do not match. Cause not verified | Observed (mismatch) |
+| C11 | Timing of `/fail` | Gaps follow the configured delays: `PT10S`, `PT30S`, `PT1M`, `PT2M` | Gaps of 32.7 s, 128.7 s, 428.5 s and 2 077.4 s. They do not match. Cause not verified | Observed (mismatch) |
 | C12 | Isolation: `payment_created` for `CLIENT002` | No notification for the `CLIENT001` subscriptions. The `202` body for an event with no match is not documented | | Not run |
 | C13 | Grafana during C | `success` and `retryable` outcomes. `cobre-attempt-failure-rate` firing. `cobre-failed-rate` firing once `/fail` ends | Not checked | Not run |
 
