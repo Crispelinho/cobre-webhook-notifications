@@ -302,7 +302,7 @@ Query parameters:
 | Name | Default | Notes |
 |---|---|---|
 | `delivery_status` | none | `pending`, `retrying`, `completed` or `failed` |
-| `created_from`, `created_to` | none | Format not verified in this run |
+| `created_from`, `created_to` | none | ISO-8601 instant with a zone, for example `2024-03-15T10:00:00Z`. A bare date such as `2024-03-15` is rejected with `400`. `created_from` is inclusive, `created_to` exclusive. `created_from` after `created_to` is rejected |
 | `page` | `0` | Starts at 0 |
 | `size` | `20` | Maximum 100 |
 
