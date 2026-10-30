@@ -2,7 +2,7 @@
 
 Delivers platform events to client webhooks over HTTPS and gives clients a self-service REST API to query and replay their notifications. Built for the Cobre technical challenge.
 
-> **Status:** the five planned changes are merged into `develop`. Some decisions are not yet implemented (subscription limit, `Retry-After` cap and processing recovery) and are tracked in the [Roadmap](#roadmap) and in the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md).
+> **Status:** the five planned changes and the reconciliation changes for the subscription limits, the `Retry-After` cap, processing recovery and signed delivery rules are merged into `develop`. Retrying transient DNS failures is specified and not yet implemented. See the [Roadmap](#roadmap) and the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md).
 
 ## What it does
 
@@ -80,6 +80,29 @@ The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` 
 
 The `local` profile ships a development-only key; never reuse it elsewhere.
 
+### Receiving webhooks
+
+Every attempt is an HTTPS `POST` with these headers:
+
+| Header | Meaning |
+|---|---|
+| `Cobre-Notification-Id` | Identifier of the notification event. It is the same on every attempt and in every round, including a replay. |
+| `Cobre-Signature` | `t=<unix seconds>,v1=<hex>`, where `v1` is the lowercase hex HMAC-SHA256 of `t + "." + body` using the subscription secret. |
+
+To verify a request:
+
+1. Read `t` and `v1` from `Cobre-Signature`.
+2. Reject the request if `t` is more than 5 minutes away from your clock.
+3. Compute HMAC-SHA256 of `t + "." + raw body bytes` with your secret and compare it to `v1` in constant time. Use the raw bytes as received, not a re-serialized JSON.
+
+`t` is taken at send time on every attempt, so a retry sent after a long backoff still verifies within the tolerance. The body is byte-identical on every attempt and in every round; only `t` and `v1` change.
+
+Delivery semantics:
+
+- Delivery is **at-least-once** while the configured attempts and recovery operations run. A webhook may reach you more than once. There is no end-to-end exactly-once guarantee.
+- Deduplicate on `Cobre-Notification-Id`: process a given identifier once and answer `2xx` for repeats.
+- A timeout does not prove that you did not process the request. If you processed it but answered too late, the notification event is retried with the same `Cobre-Notification-Id` and the same body.
+
 ## How we work
 
 The project follows a hybrid **ODD + SDD** approach (objective-driven, then specification-driven) with [OpenSpec](https://github.com/Fission-AI/OpenSpec).
@@ -109,12 +132,13 @@ openspec validate --all --strict
 | 3 | `add-notification-replay` | Merged (#9); spec still in `openspec/changes/` |
 | 4 | `add-subscription-management` | Merged and archived |
 | 5 | `add-observability-and-audit` | Merged (#13); spec still in `openspec/changes/` |
-| 6 | `add-subscription-limits` | Specified, not implemented |
-| 7 | `add-retry-after-cap` | Specified, not implemented |
-| 8 | `add-processing-recovery` | Specified, not implemented |
-| 9 | `add-signed-delivery-rules` | Specified |
+| 6 | `add-subscription-limits` | Merged (#19, #29); spec still in `openspec/changes/` |
+| 7 | `add-retry-after-cap` | Merged (#30); spec still in `openspec/changes/` |
+| 8 | `add-processing-recovery` | Merged (#20); spec still in `openspec/changes/` |
+| 9 | `add-signed-delivery-rules` | Merged (tests and receiver documentation; the behaviour already existed); spec still in `openspec/changes/` |
+| 10 | `add-transient-dns-retry` | Specified, not implemented |
 
-Changes 6 to 9 come from the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md). Each one is specified in `openspec/changes/` before any code.
+Changes 6 to 10 come from the [reconciliation plan](docs/process/discrepancy-reconciliation-2026-10-28.md). Each one is specified in `openspec/changes/` before any code.
 
 ## Documentation
 
