@@ -568,7 +568,7 @@ Expected: `202`, with two notification event ids, one per subscription.
 | Subscription | Receiver window | Final `delivery_status` | Attempts |
 |---|---|---|---|
 | `/ok` | `/ok 200 <n>` once | `completed`, `delivered_at` set | 1 (`http_status` 200, `delivery_attempts` round 1) |
-| `/fail` | `/fail 500 <n>` five times | `failed`, `last_error` `retries_exhausted` | 5 (`attempt_number` 1 to 5, `http_status` 500) |
+| `/fail` | `/fail 500 <n>` five times | `failed`, `last_error` `http_500` | 5 (`attempt_number` 1 to 5, `http_status` 500) |
 
 For `/fail`, the second run in [Verified run](#verified-run) measured the first three attempts at about +0 s, +11 s and +42 s. A later run measured all five at +0 s, +33 s, +161 s, +590 s and +2 667 s (44 minutes), which does not match the configured delays; see [Observed run](#observed-run-2026-10-29). The sequence does not take four minutes, as an earlier estimate in this section said. Plan for up to 45 minutes, and read the real times from `delivery_attempts.attempted_at`. `last_error` is `retries_exhausted` because a `500` response has no transport error type (`Delivery`).
 
@@ -641,7 +641,7 @@ A console log of the service, started from the main checkout (`cobre-webhook-not
 | 22:16:28 and 22:16:33 | WARN from `HikariPool-1`: `Failed to validate connection … (This connection has been closed.)` | Cause not explained. No attempt in the log is affected |
 | 22:38:37.559 | Attempt 5, `RETRYABLE` (+2 077.4 s after attempt 4). Retry topic `notification.dispatch-retry-3` | Attempt 5 happened, 34 minutes after attempt 4. The gap is not confirmed (see below) |
 | 22:38:37.567 | ERROR: the message is sent to `notification.dispatch-dlt`, with a full stack trace | Dead-letter path, after the last attempt |
-| 22:38:37.801 | ERROR: `Notification event 01a18aba-a19b-743c-91e1-bf7a93ad6983 round 1 failed: retries exhausted` | `failed` with `retries_exhausted`, as the code path defines it. The database was not queried |
+| 22:38:37.801 | ERROR: `Notification event 01a18aba-a19b-743c-91e1-bf7a93ad6983 round 1 failed: retries exhausted` | `failed`. The database stores `last_error` `http_500`, not `retries_exhausted` (checked 2026-10-30) |
 
 What this run shows:
 
@@ -653,7 +653,7 @@ What this run shows:
 Not verified, and needed to close this run:
 
 - The number of `/fail 500` lines in the receiver window. The paste did not include it.
-- The state of the `/fail` notification in the database (`failed`, `retries_exhausted`, five attempts). The log says it, but no query confirmed it.
+- Confirmed on 2026-10-30: the `/fail` notification is `failed` with five attempts and `last_error` `http_500`. Its five `delivery_attempts` match the log timestamps.
 - Grafana: `notification_dead_letter_total` and the four alert rules after this run.
 - The startup profile line of this run.
 - Which two subscriptions were deactivated at 22:11:46, and whether one of them is the subscription outside the test.
