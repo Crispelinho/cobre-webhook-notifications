@@ -1,5 +1,6 @@
 package com.cobre.notifications.shared.security;
 
+import java.time.Duration;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -10,6 +11,8 @@ import org.springframework.core.env.Profiles;
 
 @Configuration(proxyBeanMethods = false)
 class DestinationPolicyConfiguration {
+
+	private static final String ANY_HOST = "*";
 
 	@Bean
 	DestinationPolicy.HostResolver hostResolver() {
@@ -34,6 +37,16 @@ class DestinationPolicyConfiguration {
 		List<String> hosts = allowedHosts.stream().map(String::strip).filter(host -> !ANY_HOST.equals(host)).toList();
 		return new DestinationPolicy(hosts, hostResolver, DestinationPolicy.DEFAULT_RESOLVE_TIMEOUT, maxConcurrentLookups,
 				anyHost);
+	}
+
+	static DestinationPolicy destinationPolicy(List<String> allowedHosts, Environment environment,
+			DestinationPolicy.HostResolver hostResolver, Duration resolveTimeout) {
+		boolean anyHost = allowedHosts.stream().map(String::strip).anyMatch(ANY_HOST::equals);
+		if (anyHost && !environment.acceptsProfiles(Profiles.of("local"))) {
+			throw new IllegalStateException("app.webhook.allowed-hosts may contain \"*\" only in the local profile");
+		}
+		List<String> hosts = allowedHosts.stream().map(String::strip).filter(host -> !ANY_HOST.equals(host)).toList();
+		return new DestinationPolicy(hosts, hostResolver, resolveTimeout, DestinationPolicy.MAX_CONCURRENT_LOOKUPS, anyHost);
 	}
 
 }

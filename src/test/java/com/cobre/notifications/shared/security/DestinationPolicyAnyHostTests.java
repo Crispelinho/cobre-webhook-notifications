@@ -23,7 +23,7 @@ class DestinationPolicyAnyHostTests {
 	@Test
 	void anyHostResolvingToAPublicAddressIsAccepted() {
 		DestinationPolicy policy = new DestinationPolicy(List.of(), resolving("93.184.215.14"),
-				DestinationPolicy.DEFAULT_RESOLVE_TIMEOUT, true);
+				DestinationPolicy.DEFAULT_RESOLVE_TIMEOUT, DestinationPolicy.MAX_CONCURRENT_LOOKUPS, true);
 
 		assertThat(policy.check("https://any-tunnel-name.example.net/cobre").host()).isEqualTo("any-tunnel-name.example.net");
 	}
@@ -32,7 +32,7 @@ class DestinationPolicyAnyHostTests {
 	@ValueSource(strings = { "10.0.0.5", "192.168.1.1", "127.0.0.1", "169.254.169.254" })
 	void anyHostResolvingToAPrivateLoopbackOrLinkLocalAddressIsStillRejected(String address) {
 		DestinationPolicy policy = new DestinationPolicy(List.of(), resolving(address),
-				DestinationPolicy.DEFAULT_RESOLVE_TIMEOUT, true);
+				DestinationPolicy.DEFAULT_RESOLVE_TIMEOUT, DestinationPolicy.MAX_CONCURRENT_LOOKUPS, true);
 
 		assertThatExceptionOfType(RejectedDestinationException.class)
 			.isThrownBy(() -> policy.check("https://any-tunnel-name.example.net/cobre"))
@@ -44,7 +44,7 @@ class DestinationPolicyAnyHostTests {
 		DestinationPolicy.HostResolver none = host -> {
 			throw new UnknownHostException(host);
 		};
-		DestinationPolicy policy = new DestinationPolicy(List.of(), none, DestinationPolicy.DEFAULT_RESOLVE_TIMEOUT, true);
+		DestinationPolicy policy = new DestinationPolicy(List.of(), none, DestinationPolicy.DEFAULT_RESOLVE_TIMEOUT, DestinationPolicy.MAX_CONCURRENT_LOOKUPS, true);
 
 		assertThatExceptionOfType(DestinationResolutionException.class)
 			.isThrownBy(() -> policy.check("https://missing.example.net/cobre"));
