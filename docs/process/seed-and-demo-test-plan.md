@@ -12,7 +12,7 @@ It extends [the local HTTPS delivery runbook](local-https-delivery-runbook.md), 
 
 ## 0. Prerequisites
 
-Follow Steps 1 to 3 of the HTTPS runbook for the receiver, the tunnel and `WEBHOOK_ALLOWED_HOSTS`. Use the `local,demo` profiles so retries are visible within minutes.
+Follow Steps 1 to 3 of the HTTPS runbook for the receiver, the tunnel and `WEBHOOK_ALLOWED_HOSTS`. Use the `local` profile so retries are visible within minutes.
 
 Receiver:
 
@@ -140,7 +140,7 @@ Each case lists the action and the expected result. The `Status` column says whe
 
 Run in this order. Use new `event_id` values for every ingestion.
 
-1. Start the stack with `local,demo`, the tunnel and the receiver (runbook Steps 1 to 3).
+1. Start the stack with `local`, the tunnel and the receiver (runbook Steps 1 to 3).
 2. R1: register the subscription. Save the secret.
 3. I1: ingest one event for a seed event type with a new `event_id`.
 4. D1: show the signed delivery on `/ok` and the `completed` row.

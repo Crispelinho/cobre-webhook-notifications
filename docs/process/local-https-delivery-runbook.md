@@ -90,7 +90,7 @@ DEMO_WEBHOOK_SECRET=whsec_<throwaway value>
 
 Prefix an entry with `.` only if you want its subdomains too: `.ngrok-free.app` would allow every ngrok host. For a demo, the exact host is the safer choice.
 
-To see retries quickly, add `SPRING_PROFILES_ACTIVE=local,demo`. The `demo` profile uses the delays `PT10S,PT30S,PT1M,PT2M` instead of the 30 s to 1 h backoff.
+The `local` profile uses the delays `PT10S,PT30S,PT1M,PT2M` instead of the 30 s to 1 h backoff, so a failed delivery ends in about four minutes.
 
 If `docker compose` cannot bind the fixed host port `9092` for Kafka (PostgreSQL is published without a fixed host port in `compose.yaml`, so its host port is random; find it with `docker compose port postgres 5432`), another Compose stack already holds them. This happens when two checkouts run the stack at the same time. Do not stop the other stack; start your own containers on free ports and point the app at them:
 
@@ -147,7 +147,7 @@ Check the state of the delivery with the notifications API (`GET /notification_e
   }
   ```
 
-A `2xx` status marks the delivery as completed. Any other status, or a timeout, is retried. A round has five attempts (the first one included). With the `demo` profile the configured delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts. The second run in [Verified run](#verified-run) measured the first three attempts at +0 s, +11 s and +42 s. A later run did not match the configured delays; see [Observed run](#observed-run-2026-10-29). When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
+A `2xx` status marks the delivery as completed. Any other status, or a timeout, is retried. A round has five attempts (the first one included). With the `local` profile the scheduled delays are `PT10S`, `PT30S`, `PT1M` and `PT2M` between attempts; the first three attempts were measured at +0 s, +11 s and +42 s. A later run did not match the configured delays; see [Observed run](#observed-run-2026-10-29). When the attempts run out, the notification ends as `failed`. Only a replay starts a new round (`POST /notification_events/{id}/replay`).
 
 ## Verifying the signature
 

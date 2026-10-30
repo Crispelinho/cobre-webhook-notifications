@@ -25,13 +25,13 @@ class SampleDataSeederSecretTests {
 		.fromBase64Key(Base64.getEncoder().encodeToString("0123456789abcdef0123456789abcdef".getBytes()));
 
 	@Test
-	void theDemoProfileWithoutTheSecretFailsStartupWithAClearMessage() {
+	void theSeedWithoutTheSecretFailsStartupWithAClearMessage() {
 		// The system property wins over a DEMO_WEBHOOK_SECRET that may exist in the developer's environment.
 		String previous = System.getProperty("DEMO_WEBHOOK_SECRET");
 		System.setProperty("DEMO_WEBHOOK_SECRET", "");
 		try {
 			new ApplicationContextRunner().withInitializer(new ConfigDataApplicationContextInitializer())
-				.withPropertyValues("spring.profiles.active=demo", "app.seed.enabled=true")
+				.withPropertyValues("spring.profiles.active=local", "app.seed.enabled=true")
 				.withBean(JdbcClient.class, () -> mock(JdbcClient.class))
 				.withBean(JsonMapper.class, () -> JsonMapper.builder().build())
 				.withBean(SecretCipher.class, () -> CIPHER)

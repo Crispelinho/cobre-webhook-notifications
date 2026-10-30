@@ -8,7 +8,7 @@ Approved on 2026-10-28, before any code was written. Every objective has a crite
 |---|---|---|
 | O1 | Client isolation | 100% of cross-client (BOLA) tests return `404`. No list ever contains another client's notification events. |
 | O2 | Delivery | Locally, a notification event that matches a subscription gets its first attempt within 2 s (p95). An event without a matching subscription is never sent. |
-| O3 | Retries | At most 5 attempts per round. In the demo profile a full round takes 4 min or less. A permanent error produces exactly 1 attempt. Every attempt is stored. |
+| O3 | Retries | At most 5 attempts per round. In the local profile a full round takes 4 min or less. A permanent error produces exactly 1 attempt. Every attempt is stored. |
 | O4 | Query | Filters return exactly the expected set on the sample data (for example, CLIENT003 + `failed` returns EVT009 and EVT005). p95 below 300 ms locally. `size` above 100 returns `400`. |
 | O5 | Replay | Returns `202`. Returns `409` when the notification event is not `failed`. Of two concurrent replays, exactly one succeeds. |
 | O6 | Observability | A metric is visible in Grafana within 30 s. Alerts fire within 1 min when the `failed` rate exceeds 5% over 5 min and when a message reaches the dead-letter topic. |

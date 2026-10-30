@@ -69,7 +69,7 @@ docker compose up -d
 | Kafka | `9092` |
 | Grafana | [http://localhost:3000](http://localhost:3000) |
 
-The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` starts these services automatically. To run the full flow against a real HTTPS receiver, follow the [local HTTPS delivery runbook](docs/process/local-https-delivery-runbook.md). Profiles: `local` enables the development token issuer and loads the sample data; `demo` shortens the retry delays so a full round takes minutes. Use them together with `SPRING_PROFILES_ACTIVE=local,demo`.
+The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` starts these services automatically. To run the full flow against a real HTTPS receiver, follow the [local HTTPS delivery runbook](docs/process/local-https-delivery-runbook.md). The `local` profile enables the development token issuer, loads the sample data and shortens the retry delays so a full round takes minutes.
 
 ### Webhook configuration
 
