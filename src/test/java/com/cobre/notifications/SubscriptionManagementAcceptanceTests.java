@@ -496,6 +496,34 @@ class SubscriptionManagementAcceptanceTests {
 	}
 
 	@Test
+	void inactiveSubscriptionsDoNotCountTowardsTheLimit() throws Exception {
+		String client = "SUBTEST_LIMIT_INACTIVE";
+		for (int i = 0; i < 10; i++) {
+			String id = createdId(client);
+			mvc.perform(asWriter(client, patch("/subscriptions/" + id), "{\"active\":false}"))
+				.andExpect(status().isOk());
+		}
+		for (int i = 0; i < 49; i++) {
+			createdId(client);
+		}
+
+		mvc.perform(asWriter(client, post("/subscriptions"), VALID_BODY)).andExpect(status().isCreated());
+		assertThat(countFor(client)).isEqualTo(60);
+	}
+
+	@Test
+	void theLimitIsPerClient() throws Exception {
+		String atTheLimit = "SUBTEST_LIMIT_FULL";
+		String other = "SUBTEST_LIMIT_OTHER";
+		for (int i = 0; i < 50; i++) {
+			createdId(atTheLimit);
+		}
+
+		mvc.perform(asWriter(other, post("/subscriptions"), VALID_BODY)).andExpect(status().isCreated());
+		assertThat(countFor(other)).isEqualTo(1);
+	}
+
+	@Test
 	void concurrentCreationNeverExceedsFiftyActiveSubscriptions() throws Exception {
 		String client = "SUBTEST_LIMIT_CONCURRENT";
 		ExecutorService pool = Executors.newFixedThreadPool(20);
