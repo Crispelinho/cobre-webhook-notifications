@@ -242,6 +242,17 @@ Under the [load assumptions](../requirements/objectives.md#load-assumptions):
 | Application crashes mid-delivery | The offset is not committed and the message is redelivered. The idempotency check avoids double recording, but **the webhook may be sent twice**; receivers deduplicate with `Cobre-Notification-Id`. |
 | Relay crashes after publishing, before marking | Duplicate publish, absorbed by the idempotent consumer. |
 
+## Known limitations
+
+Found by the dual blind review of the delivery path (2026-10-30, see #53) and accepted for the challenge. None changes the status contract or loses a notification event.
+
+| Limitation | Effect | Possible fix |
+|---|---|---|
+| The webhook HTTP client uses the Apache pool defaults (5 connections per route, 25 in total) and no connection-request timeout. | Time spent waiting for a pooled connection counts toward the 10-second attempt limit (D50), so a busy receiver could see attempts recorded as `timeout` without a request being sent. Today the dispatch consumer runs one listener thread, which masks it. | Size the pool for the consumer concurrency and set a short connection-request timeout that is not charged to the attempt. |
+| Published `outbox` rows and `delivery_attempts` rows are never purged. | Both tables grow without bound. The relay index is partial, so relay scans stay cheap, but storage and vacuum cost grow. | A retention job, for example deleting outbox rows published more than 7 days ago and archiving old attempts. |
+| A duplicate dispatch message for a `retrying` event is claimed and sent at once (reported by one reviewer, not reproduced). | Under at-least-once delivery (D55), a duplicate can skip the backoff step and use one of the 5 attempts. A `Retry-After` wait is protected, because `next_attempt_at` blocks early sends. | Store a not-before time for backoff steps too, and refuse a claim before it. |
+| `notification.delivery.end_to_end.duration` is measured from the notification event's `created_at`, also for a replayed round. | After a replay, the "creation to final outcome" panel includes the time before the replay, which skews its p95. The failed-rate alert counts outcomes only and is unaffected. | Measure a replayed round from its replay time, or tag replayed rounds and leave them out of the panel. |
+
 ## Sensitive data
 
 `content` is never logged, always travels over TLS and is returned only to its owner. Encryption at rest is delegated to the database in production (for example, RDS with KMS); there is none locally.
