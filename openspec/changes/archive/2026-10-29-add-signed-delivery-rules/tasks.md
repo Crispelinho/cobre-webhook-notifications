@@ -20,3 +20,8 @@
 ## 4. Verification
 
 - [ ] 4.1 `./gradlew build` passes; dual blind AI review (delivery and security change) before the pull request
+
+## Archive notes (2026-10-29)
+
+- Implemented by PR #31 as tests and receiver documentation; the behaviour already existed.
+- 4.1: the build passed before merge according to PR #31 (528 tests). The dual blind AI review is recorded as pending.

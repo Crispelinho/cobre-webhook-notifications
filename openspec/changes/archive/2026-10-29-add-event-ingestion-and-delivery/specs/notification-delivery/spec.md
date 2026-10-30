@@ -78,7 +78,7 @@ The system SHALL send each notification event as an HTTPS `POST` with a JSON bod
 
 ### Requirement: Retry policy
 
-The system SHALL retry timeouts, connection errors, `5xx`, `408` and `429` (honoring `Retry-After` up to the next backoff step) with exponential backoff and jitter, up to 5 attempts per round. Any other response SHALL fail the notification event immediately.
+The system SHALL retry timeouts, connection errors, `5xx`, `408` and `429` (`Retry-After` on `429` and `503` as defined in "Retry-After handling") with exponential backoff and jitter, up to 5 attempts per round. Any other response SHALL fail the notification event immediately.
 
 #### Scenario: Transient errors then success
 
@@ -100,7 +100,7 @@ The system SHALL retry timeouts, connection errors, `5xx`, `408` and `429` (hono
 
 #### Scenario: Slow receiver
 
-- **WHEN** the receiver does not answer within the read timeout
+- **WHEN** the receiver does not answer within the 10-second limit per attempt (D50)
 - **THEN** the attempt is recorded with `error_type` `timeout` and retried
 
 ### Requirement: Idempotent delivery
@@ -125,10 +125,27 @@ Before each request the system SHALL validate the destination with the destinati
 
 ### Requirement: Signed webhooks
 
-Each request SHALL carry a `Cobre-Signature` header computed with the subscription secret, as defined in `platform-security`. Subscriptions without a secret (seed data) SHALL be delivered unsigned.
+Each request SHALL carry a `Cobre-Signature` header computed with the subscription secret, as defined in `platform-security`. A subscription without a secret SHALL NOT be delivered unsigned: the attempt SHALL fail permanently with `error_type` `missing_secret` and no request SHALL be sent.
 
 #### Scenario: Receiver verifies the signature
 
 - **GIVEN** a subscription with a known secret
 - **WHEN** a notification event is delivered
 - **THEN** the `Cobre-Signature` header verifies against the request body with that secret
+
+#### Scenario: Subscription without a secret
+
+- **GIVEN** a subscription that has no secret
+- **WHEN** a notification event is delivered
+- **THEN** no request is sent
+- **AND** the notification event becomes `failed` after one attempt with `error_type` `missing_secret`
+
+### Requirement: Deactivation keeps existing deliveries
+
+Deactivating a subscription SHALL only stop matching new events. Notification events that already exist SHALL keep their delivery and retries; the inactive state alone SHALL NOT block an attempt or a replay.
+
+#### Scenario: Subscription deactivated during retries
+
+- **GIVEN** a notification event in `retrying` whose subscription is then deactivated
+- **WHEN** its next attempt is due
+- **THEN** the request is sent as usual

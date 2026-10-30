@@ -14,3 +14,7 @@
 
 - [x] 3.1 Tests for every scenario, including concurrent replays and a replayed delivery end to end
 - [ ] 3.2 `./gradlew build` passes; fresh-context AI review before the pull request
+
+## Archive notes (2026-10-29)
+
+- 3.2: the build passed before merge according to PR #9 (388 tests). PR #9 and `docs/ai-usage/06` say a fresh-context review ran, but there is no review record, so the task stays unchecked.
