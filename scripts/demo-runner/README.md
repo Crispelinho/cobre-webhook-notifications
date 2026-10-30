@@ -30,7 +30,7 @@ Start the three pieces in this order. Use the same secrets and log files for the
 3. The service, with the tunnel host allowed (`WEBHOOK_ALLOWED_HOSTS` is the only allowlist setting that changes):
 
    ```bash
-   SPRING_PROFILES_ACTIVE=local,demo
+   SPRING_PROFILES_ACTIVE=local
    WEBHOOK_ALLOWED_HOSTS=<tunnel host>
    DEMO_WEBHOOK_SECRET=whsec_<throwaway value>
    ./gradlew bootRun
@@ -59,7 +59,7 @@ They cover the signature check, the receiver's routes and log, and the scenario 
 
 ## Limits
 
-- **The `fail` scenario takes a long time.** Its timeout is one hour. The observed run took about 44 minutes with the attempt gaps described in the runbook, and those gaps are not explained. Use the `demo` profile to shorten the schedule, and read the real times from the report.
+- **The `fail` scenario takes a long time.** Its timeout is one hour. The observed run took about 44 minutes with the attempt gaps described in the runbook, and those gaps are not explained. The `local` profile sets short delays. Read the real times from the report.
 - **`last_error` is not checked.** The API does not expose it; the scenario checks the attempts and their HTTP statuses instead.
 - **`event_type` values are not verified.** The runner uses `demo_<id>_<run>`. If the service rejects that format, the first run will say so.
 - **No DNS scenario.** `dns_error` needs a host that does not resolve; the runner cannot create one.
