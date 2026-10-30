@@ -9,7 +9,7 @@
 
 - [x] 2.1 Unit tests for `Retry-After` parsing: delta-seconds, HTTP-date, value above the cap, past HTTP-date, `0`, value below the backoff step, invalid value, missing header
 - [x] 2.2 Unit tests for the outcome classification with a delay on `429` and `503`, and no delay on other statuses
-- [ ] 2.3 Integration tests with WireMock over HTTPS: the next attempt is not earlier than the honoured or capped delay; the fifth attempt still ends the round
+- [x] 2.3 Integration tests with WireMock over HTTPS: the next attempt is not earlier than the honoured or capped delay; the fifth attempt still ends the round
 
 ## 3. Implementation
 

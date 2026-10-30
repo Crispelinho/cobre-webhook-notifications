@@ -147,6 +147,43 @@ class DeliveryIntegrationTests {
 	}
 
 	@Test
+	void aRetryAfterDelayIsNotShortenedByTheNextAttempt() throws Exception {
+		receiver.stubFor(post("/throttled").inScenario("throttled")
+			.whenScenarioStateIs(com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED)
+			.willReturn(aResponse().withStatus(429).withHeader("Retry-After", "2"))
+			.willSetStateTo("recovered"));
+		receiver.stubFor(post("/throttled").inScenario("throttled")
+			.whenScenarioStateIs("recovered")
+			.willReturn(aResponse().withStatus(200)));
+
+		String id = ingestFor("/throttled");
+		awaitStatus(id, "completed");
+
+		assertThat(attempts(id)).extracting(a -> a.get("http_status")).containsExactly(429, 200);
+		// The receiver asked for 2 s: the second attempt is stored with next_attempt_at and never sent earlier (D53, D63).
+		List<java.time.Instant> times = jdbc.sql("SELECT attempted_at FROM delivery_attempts "
+				+ "WHERE notification_id = :id ORDER BY attempt_number")
+			.param("id", id)
+			.query(java.time.Instant.class)
+			.list();
+		assertThat(Duration.between(times.get(0), times.get(1))).isGreaterThanOrEqualTo(Duration.ofSeconds(2));
+	}
+
+	@Test
+	void aRetryAfterOnEveryAttemptStillEndsTheRoundAfterFiveAttempts() throws Exception {
+		receiver.stubFor(post("/always-throttled").willReturn(aResponse().withStatus(429).withHeader("Retry-After", "1")));
+
+		String id = ingestFor("/always-throttled");
+		awaitStatus(id, "failed");
+
+		// Retry-After never adds attempts: the round still stops at five (D18, D49).
+		assertThat(attempts(id)).hasSize(5);
+		assertThat(attempts(id)).extracting(a -> a.get("http_status")).containsOnly(429);
+		assertThat(attempts(id)).extracting(a -> a.get("round")).containsOnly(1);
+		assertThat(notification(id).get("attempts")).isEqualTo(5);
+	}
+
+	@Test
 	void aPermanentErrorFailsAfterOneAttemptWithoutRetry() throws Exception {
 		receiver.stubFor(post("/gone").willReturn(aResponse().withStatus(400)));
 

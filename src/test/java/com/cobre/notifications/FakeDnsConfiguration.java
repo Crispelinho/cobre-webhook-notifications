@@ -23,6 +23,9 @@ class FakeDnsConfiguration {
 			"presentation.example.com", "93.184.215.20", "loopback.example.org", "127.0.0.1",
 			"private.example.org", "10.0.0.5", "metadata.example.org", "169.254.169.254");
 
+	/** Allowlisted but absent from the map: the name does not resolve, like a transient DNS failure (D54). */
+	static final String UNRESOLVED_HOST = "unresolved.example.org";
+
 	@Bean
 	@Primary
 	HostResolver fakeHostResolver() {
@@ -37,7 +40,7 @@ class FakeDnsConfiguration {
 
 	@Bean
 	DynamicPropertyRegistrar webhookAllowedHosts() {
-		return registry -> registry.add("app.webhook.allowed-hosts", () -> String.join(",", ADDRESSES.keySet()));
+		return registry -> registry.add("app.webhook.allowed-hosts", () -> String.join(",", ADDRESSES.keySet()) + "," + UNRESOLVED_HOST);
 	}
 
 }
