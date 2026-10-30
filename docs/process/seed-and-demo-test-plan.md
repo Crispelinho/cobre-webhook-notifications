@@ -99,7 +99,7 @@ Each case lists the action and the expected result. The `Status` column says whe
 | ID | Action | Expected result | Status |
 |---|---|---|---|
 | D1 | Subscription to `/ok`, event I1 | Receiver gets `POST`, `Content-Type: application/json`, `Cobre-Notification-Id`, `Cobre-Signature`, body with the documented fields. Signature verifies. The notification is `completed` with `delivered_at` set and `attempts` 1. `delivery_attempts`: one row, `round` 1, `attempt_number` 1, `http_status` 200 | Verified in the runbook |
-| D2 | Subscription to `/fail`, same event type | Five attempts. Final status `failed`, `delivery_date` set, `last_error` `retries_exhausted`. `delivery_attempts`: five rows, `attempt_number` 1 to 5. The first three attempts are at about +0 s, +11 s and +42 s | Verified in the runbook for the three first attempts; the last two are not timed |
+| D2 | Subscription to `/fail`, same event type | Five attempts. Final status `failed`, `delivery_date` set, `last_error` `retries_exhausted`. `delivery_attempts`: five rows, `attempt_number` 1 to 5. The first three attempts are at about +0 s, +11 s and +42 s | Verified in the runbook for the three first attempts. The observed run timed all five, and the gaps do not match the configured delays (cause not verified) |
 | D3 | Metric counter during D2 | `notification.delivery.attempts` for outcome `retryable` increases by 5 | Expected (`MicrometerDeliveryMetrics`) |
 | D4 | Signature check on D1 with one changed byte in the body | Verification fails. The original body verifies | Verified in the runbook |
 | D5 | Retry-After on a `429` response from the receiver | Honoured with a cap of 300 seconds (decision D49). Not in the code | Not implemented |
@@ -157,5 +157,5 @@ Run in this order. Use new `event_id` values for every ingestion.
 - Decision 7 (lease, fencing token) is approved but not implemented. Case X3 is a risk, not a passed check.
 - Decision D49 (`Retry-After` cap of 300 s) is not implemented. Case D5 is a gap.
 - Seed replay (P5) cannot reach the demo receiver by design (decision D13 stores the URL as a snapshot). It is documented, not a demo path.
-- Not verified in this branch: the database credentials and port of `compose.yaml`; that `webhook.example.com` does not resolve in real DNS; the exact timing of the fourth and fifth attempts; the audit log output format.
+- Not verified in this branch: the database credentials and port of `compose.yaml`; that `webhook.example.com` does not resolve in real DNS; the cause of the retry gaps (measured in the observed run, not explained by the configured delays); the audit log output format.
 - Expected results marked as such must be run and then updated to the observed values before this plan is used as evidence.
