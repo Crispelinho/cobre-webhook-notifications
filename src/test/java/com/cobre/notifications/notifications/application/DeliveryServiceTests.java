@@ -208,16 +208,17 @@ class DeliveryServiceTests {
 			// The scheduler clears the time and enqueues a message; simulate that claim.
 			store.current = withoutNextAttempt(store.current);
 		}
-		// The fifth attempt uses the last one: nothing is scheduled, the normal exhaustion path takes over.
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+		// The fifth attempt uses the last one: nothing is scheduled and the event fails in that same call.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
 		assertThat(store.delay).isNull();
 		assertThat(store.attempts).hasSize(5);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
 
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+		// A sixth message sends nothing.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
 
 		assertThat(sent).hasSize(5);
 		assertThat(store.attempts).hasSize(5);
-		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
 	}
 
 	@Test
@@ -249,12 +250,46 @@ class DeliveryServiceTests {
 		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
 		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(30));
 
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
 
 		assertThat(store.attempts).hasSize(1);
 		assertThat(store.delay).isNull();
 		assertThat(store.current.nextAttemptAt()).isNull();
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+		assertThat(sent).hasSize(1);
+	}
+
+	@Test
+	void aRetryableFifthAttemptFailsTheEventInTheSameCallAndGoesStraightToTheDeadLetter() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
+		nextResult = AttemptResult.response(NOW, 503, 20);
+
+		assertThat(observed.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+
+		assertThat(store.attempts).singleElement().satisfies(attempt -> assertThat(attempt.attemptNumber()).isEqualTo(5));
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.attemptsInRound()).isEqualTo(5);
+		assertThat(store.current.deliveryDate()).isNotNull();
+		assertThat(store.current.lastError()).isEqualTo("http_503");
+		assertThat(store.current.nextAttemptAt()).isNull();
+		assertThat(store.delay).isNull();
+		assertThat(metrics.finals).hasSize(1);
+	}
+
+	@Test
+	void aRetryAfterOnTheRetryableFifthAttemptAlsoFailsTheEventInTheSameCall() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(30));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+
+		assertThat(store.attempts).hasSize(1);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.deliveryDate()).isNotNull();
+		assertThat(store.current.nextAttemptAt()).isNull();
+		assertThat(store.delay).isNull();
 		assertThat(sent).hasSize(1);
 	}
 
@@ -288,16 +323,19 @@ class DeliveryServiceTests {
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
 		nextResult = AttemptResult.failure(NOW, TransportError.TIMEOUT, 10_000);
 
-		for (int attempt = 1; attempt <= 5; attempt++) {
+		for (int attempt = 1; attempt <= 4; attempt++) {
 			// A timeout is retryable and never completes the event, however late the receiver finally answers.
 			assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
 			assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
 			assertThat(store.attempts).hasSize(attempt);
 		}
+		// The fifth timeout uses the last attempt and fails the event in that same call.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+		assertThat(store.attempts).hasSize(5);
 		assertThat(store.attempts).allSatisfy(attempt -> assertThat(attempt.errorType()).isEqualTo("timeout"));
 
-		// The sixth message (a duplicate or the transport's last retry) sends nothing and fails the event.
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+		// A sixth message (a duplicate) sends nothing.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
 
 		assertThat(sent).hasSize(5);
 		assertThat(store.attempts).hasSize(5);
@@ -310,18 +348,21 @@ class DeliveryServiceTests {
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
 		nextResult = AttemptResult.failure(NOW, TransportError.DNS, 5_000);
 
-		for (int attempt = 1; attempt <= 5; attempt++) {
+		for (int attempt = 1; attempt <= 4; attempt++) {
 			assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
 			assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
 			assertThat(store.attempts).hasSize(attempt);
 		}
+		// The fifth DNS failure uses the last attempt and fails the event in that same call.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+		assertThat(store.attempts).hasSize(5);
 		assertThat(store.attempts).allSatisfy(attempt -> {
 			assertThat(attempt.errorType()).isEqualTo("dns_error");
 			assertThat(attempt.httpStatus()).isNull();
 		});
 
 		// The sixth message sends nothing: the five DNS attempts of the round are used up.
-		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
 
 		assertThat(sent).hasSize(5);
 		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
@@ -460,6 +501,22 @@ class DeliveryServiceTests {
 		store.current = delivery(DeliveryStatus.RETRYING, 2, 1);
 		service.failExhausted(new DispatchMessage("N1", 1));
 		assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+	}
+
+	@Test
+	void theDeadLetterHandlerDoesNotCountAgainAnEventTheLastAttemptAlreadyFailed() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
+		nextResult = AttemptResult.response(NOW, 503, 20);
+		assertThat(observed.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+		Delivery failed = store.current;
+
+		observed.failExhausted(new DispatchMessage("N1", 1));
+
+		assertThat(store.current).isEqualTo(failed);
+		assertThat(metrics.finals).hasSize(1);
+		assertThat(store.attempts).hasSize(1);
 	}
 
 	@Test

@@ -11,8 +11,9 @@ import com.cobre.notifications.notifications.application.port.in.FailExhaustedNo
 import com.cobre.notifications.notifications.application.port.out.DeliveryMetrics;
 
 /**
- * Receives the messages that exhausted every attempt and marks their notification events {@code failed}. A replay
- * starts from the database, never from this topic.
+ * Receives every dead-lettered dispatch message and counts it for the dead-letter alert. A notification event that
+ * is still open is marked {@code failed} as a fallback (for example a message that ran out of retry hops); one that
+ * the last attempt already failed is left as it is. A replay starts from the database, never from this topic.
  */
 @Component
 @ConditionalOnProperty(name = "app.delivery.consumer.enabled", havingValue = "true", matchIfMissing = true)

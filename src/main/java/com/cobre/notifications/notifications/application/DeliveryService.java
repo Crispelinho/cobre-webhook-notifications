@@ -2,6 +2,7 @@ package com.cobre.notifications.notifications.application;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -134,11 +135,18 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 		// D67: deactivating a subscription never turns an accepted notification into a failure, so there is no
 		// inactivity check here. The sender still validates the destination, requires the secret and signs every attempt.
 		AttemptResult result = sender.send(delivery);
-		Delivery after = delivery.afterAttempt(result, clock.instant());
+		Instant now = clock.instant();
+		Delivery after = delivery.afterAttempt(result, now);
+		// A retryable attempt that used the last one of the round fails the event in the same fenced write, so it never
+		// stays retrying with nothing left to try, whatever the transport's hop count is.
+		boolean lastAttemptFailed = result.outcome() == DeliveryOutcome.RETRYABLE && !after.hasAttemptsLeft(maxAttempts);
+		if (lastAttemptFailed) {
+			after = after.exhausted(now);
+		}
 		DeliveryAttempt attempt = new DeliveryAttempt(delivery.round(), delivery.nextAttemptNumber(),
 				result.attemptedAt(), result.httpStatus(), result.errorType(), result.latencyMs());
 		// Retry-After only chooses WHEN the next attempt happens. It never adds one: the attempt just recorded counts
-		// toward the limit, and with none left the normal exhaustion path runs.
+		// toward the limit, and with none left the event is already failed above, so no delay is used.
 		// The store turns the delay into a time with the database clock, so skewed application clocks cannot make an
 		// attempt run early.
 		Duration delay = result.outcome() == DeliveryOutcome.RETRYABLE && result.retryAfter() != null
@@ -160,6 +168,11 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 			log.info("Next attempt of notification event {} round {} scheduled by the receiver's Retry-After",
 					message.notificationEventId(), message.round());
 			return DeliveryResult.SCHEDULED;
+		}
+		if (lastAttemptFailed) {
+			log.error("Notification event {} round {} failed: the last attempt of the round was retryable",
+					message.notificationEventId(), message.round());
+			return DeliveryResult.EXHAUSTED;
 		}
 		return switch (result.outcome()) {
 			case SUCCESS -> DeliveryResult.DELIVERED;

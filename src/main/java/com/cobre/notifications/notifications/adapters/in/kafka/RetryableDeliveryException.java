@@ -1,8 +1,8 @@
 package com.cobre.notifications.notifications.adapters.in.kafka;
 
 /**
- * Signals Kafka that the attempt failed in a retryable way: the message moves to the next retry topic, or to the
- * dead-letter topic after the last attempt. Carries no content.
+ * Signals Kafka that the attempt failed in a retryable way: the message moves to the next retry topic. The last
+ * attempt of a round does not use this exception (see {@link ExhaustedDeliveryException}). Carries no content.
  */
 class RetryableDeliveryException extends RuntimeException {
 

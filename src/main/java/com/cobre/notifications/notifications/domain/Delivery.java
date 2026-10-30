@@ -12,7 +12,7 @@ import java.util.Objects;
  * pending  --PERMANENT--&gt; failed
  * pending  --RETRYABLE--&gt; retrying
  * retrying --SUCCESS / PERMANENT / RETRYABLE--&gt; completed / failed / retrying
- * pending | retrying --retries exhausted--&gt; failed
+ * pending | retrying --retries exhausted--&gt; failed   (the last RETRYABLE attempt of the round, in the same write)
  * </pre>
  *
  * {@code completed} and {@code failed} are final for the round; only a replay (a new round) leaves them.
@@ -78,8 +78,8 @@ public record Delivery(NotificationEventId id, String eventId, String eventType,
 	}
 
 	/**
-	 * The state after one attempt. Retries are not capped here: exhaustion is decided by the transport, which then
-	 * calls {@link #exhausted(Instant)}.
+	 * The state after one attempt. Retries are not capped here: the application service decides when the attempts
+	 * of the round are used up and then calls {@link #exhausted(Instant)}.
 	 */
 	public Delivery afterAttempt(AttemptResult result, Instant now) {
 		requireOpen();
