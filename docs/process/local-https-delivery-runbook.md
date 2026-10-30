@@ -81,14 +81,17 @@ The `local` profile enables the development JWT issuer and the seed. `WEBHOOK_AL
 SPRING_PROFILES_ACTIVE=local
 SERVER_PORT=8081
 WEBHOOK_ALLOWED_HOSTS=abc123.ngrok-free.app
+DEMO_WEBHOOK_SECRET=whsec_<throwaway value>
 ./gradlew bootRun
 ```
+
+`DEMO_WEBHOOK_SECRET` is required with the `local` profile: the seed is enabled there, and `SampleDataSeeder` fails startup when the variable is empty, so the service does not start without it. It is the signing secret of the seed subscriptions; use any throwaway `whsec_` value.
 
 Prefix an entry with `.` only if you want its subdomains too: `.ngrok-free.app` would allow every ngrok host. For a demo, the exact host is the safer choice.
 
 To see retries quickly, add `SPRING_PROFILES_ACTIVE=local,demo`. The `demo` profile uses the delays `PT10S,PT30S,PT1M,PT2M` instead of the 30 s to 1 h backoff.
 
-If `docker compose` cannot bind the fixed host ports (`9092` for Kafka, `5432` for PostgreSQL), another Compose stack already holds them. This happens when two checkouts run the stack at the same time. Do not stop the other stack; start your own containers on free ports and point the app at them:
+If `docker compose` cannot bind the fixed host port `9092` for Kafka (PostgreSQL is published without a fixed host port in `compose.yaml`, so its host port is random; find it with `docker compose port postgres 5432`), another Compose stack already holds them. This happens when two checkouts run the stack at the same time. Do not stop the other stack; start your own containers on free ports and point the app at them:
 
 ```bash
 SPRING_DOCKER_COMPOSE_ENABLED=false
@@ -220,6 +223,258 @@ Third run, on `develop` at `ed41543` (the code this branch is based on), with th
 The first run of this branch on the older base had shown the same behaviour. This run is the one that matches the code on `develop`.
 
 Not exercised: ngrok (not installed on the test machine), the public-address rule against real DNS, and the exact timestamps of the fourth and fifth attempts (only their count was measured).
+
+## Demo scenarios
+
+This section is the step-by-step guide for the demo. It runs three scenarios on one service instance, in this order:
+
+- **A**: failures without a tunnel (the seed subscription points to a host that cannot receive webhooks).
+- **B**: rejected destinations, at subscription time.
+- **C**: successes and retries, with a tunnel.
+
+Then it shows what to check in Grafana and how to clean up.
+
+Rules for every scenario:
+
+- The destination policy stays on. No scenario disables or relaxes it. The only settings that change are `WEBHOOK_ALLOWED_HOSTS` and `SPRING_PROFILES_ACTIVE`.
+- Use a new `event_id` for every event. The seed event ids `EVT001` to `EVT010` already exist and return `409`.
+- Run the scenarios in the order A, B, C. Scenario C sets `WEBHOOK_ALLOWED_HOSTS` to the tunnel host, which removes `webhook.example.com` from the allowlist, so Scenario A and the `webhook.example.com` case in Scenario B only behave as described with the default allowlist.
+- Record the baseline (see [Baseline](#baseline)) before each scenario.
+
+Variables used in the commands below (set them in the shell):
+
+```bash
+CLIENT_TOKEN=$(./gradlew -q devToken --args="CLIENT001 subscriptions:read subscriptions:write notifications:read notifications:replay")
+PRODUCER_TOKEN=$(./gradlew -q devToken --args="PRODUCER001 events:write")
+```
+
+Check that both values start with `eyJ` (a JWT header) before you continue. The `-q` flag is not verified on your machine; if the output includes Gradle messages, copy only the token line.
+
+### Preparation
+
+1. Start PostgreSQL, Kafka and Grafana from the checkout root:
+
+   ```bash
+   docker compose up -d postgres kafka grafana-lgtm
+   docker compose ps
+   ```
+
+   Expected: `postgres` is `healthy` and `kafka` and `grafana-lgtm` are `running`. Kafka answers on `9092`, Grafana on `3000`. The PostgreSQL host port is random: `docker compose port postgres 5432`. Spring Boot's Docker Compose support also starts services during `bootRun` (the dependency is `developmentOnly`), so the containers may already be up when the service starts. This is not verified for `grafana-lgtm` in this repository.
+
+2. Start the service with the `local` profile, as in [Step 3](#step-3-start-the-service-with-that-host-allowed), without `WEBHOOK_ALLOWED_HOSTS` for Scenarios A and B:
+
+   ```bash
+   SPRING_PROFILES_ACTIVE=local
+   SERVER_PORT=8081
+   DEMO_WEBHOOK_SECRET=whsec_<throwaway value>
+   ./gradlew bootRun
+   ```
+
+   Expected in the log: `Sample data loaded: 10 notification events, 3 seed subscriptions` (from `SampleDataSeeder`). The seed contents are in [section 2.1 of the test plan](seed-and-demo-test-plan.md#21-seed).
+
+3. Check health. `/actuator/health` needs no token (`SecurityConfig`):
+
+   ```bash
+   curl -s http://localhost:8081/actuator/health
+   ```
+
+   Expected: `"status":"UP"`. The response body was not checked by running the service.
+
+4. Open Grafana at `http://localhost:3000` and the dashboard **Notification delivery** (see [Verification in Grafana](#verification-in-grafana)). The Grafana login is not in this repository; this is not verified.
+
+### Baseline
+
+The dead-letter counter also moves for reasons unrelated to the demo, so take a baseline before each scenario and compare against it, not against zero.
+
+1. Count the notifications by status:
+
+   ```sql
+   SELECT delivery_status, count(*) FROM notifications GROUP BY delivery_status ORDER BY delivery_status;
+   ```
+
+2. Record these Grafana values:
+   - **Dead-letter messages (last hour)**: the current value.
+   - **Failed attempt ratio (5 min, alert above 5%)**: the current value.
+   - **Oldest unpublished outbox row**: should be near zero.
+   - The state of the four alert rules in folder **Notification delivery**: normal or firing.
+
+3. Wait at least 2 minutes after any earlier dead-letter message before you take the baseline. The rule **Message reached the dead-letter topic** is `increase(notification_dead_letter_total[2m]) > 0` with `for: 0s`, so it fires for two minutes after any message reaches the topic (`cobre-dead-letter` in `docker/grafana/provisioning/alerting/notification-delivery-alerts.yaml`).
+
+### Scenario A: failures without a tunnel
+
+**Why it fails.** The seed subscription `SUB-CLIENT001` accepts three event types: `credit_card_payment`, `debit_card_withdrawal` and `credit_deposit` (`src/main/resources/seed/notification_events.json`, `EVT001`, `EVT002` and `EVT007`). Its URL is `https://webhook.example.com/CLIENT001`. The seeder inserts this row directly, not through `POST /subscriptions`, so the policy never checks it at registration. The policy checks it at delivery time, and the `local` profile allows `webhook.example.com` by default.
+
+**Action.** Keep `WEBHOOK_ALLOWED_HOSTS` unset:
+
+```bash
+curl -s -X POST http://localhost:8081/events \
+  -H "Authorization: Bearer $PRODUCER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "DEMO-A-0001", "client_id": "CLIENT001", "event_type": "credit_deposit", "content": "{\"amount\": 250}"}'
+```
+
+Expected: `202`, with one notification for `SUB-CLIENT001`.
+
+**What to check in the database.** After a few seconds:
+
+- `notifications`: `delivery_status` `failed`, `last_error` `invalid_destination`, `attempts` 1, `round` 1.
+- `delivery_attempts`: one row, `round` 1, `attempt_number` 1, `error_type` `invalid_destination`, `http_status` NULL.
+
+Why: `HttpsWebhookSender.send` turns a `RejectedDestinationException` into `TransportError.INVALID_DESTINATION`, which `DeliveryOutcome.classify` maps to `PERMANENT`. `Delivery` then moves to `FAILED` with that error type, so there are no retries. No request is sent.
+
+**What to check in the log.** The service logs `Destination of notification event <id> rejected: <reason>` at WARN. The reason depends on DNS:
+
+- `host does not resolve`: the name has no address record.
+- `host resolves to a non-public address`: the name resolves to a private or reserved address. On the machine where this runbook was written, the local resolver answered `192.168.5.1` for `webhook.example.com`, and a public resolver (`8.8.8.8`) returned no address for it on 2026-10-29. Your result may differ. Both reasons end in `invalid_destination`.
+
+**What to check on the dashboard and in the alert rules.**
+
+- **Delivery attempts per second by outcome**: a series for `permanent` (the lower-case form of `PERMANENT`).
+- **Failed attempt ratio (5 min)**: rises. With few events, one failure is a large share of the window.
+- **Failed notification rate above 5%** (`cobre-failed-rate`): firing after its 1-minute `for` period.
+- **Attempt failure rate including retries above 5%** (`cobre-attempt-failure-rate`): firing after its 1-minute `for` period.
+- **Message reached the dead-letter topic** (`cobre-dead-letter`): should **not** move. Only a `RETRY` outcome throws in `DispatchConsumer`, which sends the message to the retry topics and, after the last one, to the dead-letter topic. A `PERMANENT` outcome does not throw.
+- **Oldest unpublished outbox row older than 60 s** (`cobre-outbox-age`): should stay normal.
+
+### Scenario B: rejected destinations
+
+Each request registers a subscription with the `CLIENT001` client token. Expected in every case: `400`, a `ProblemDetail` whose `detail` is the same generic text, and no new row in `subscriptions`:
+
+```text
+url is not an allowed destination: it must use https, be on an allowlisted host and resolve to public addresses
+```
+
+The API never returns the reason. The reason is only in the service log, as `Subscription destination rejected: <reason>` (`PolicyDestinationValidator`, logged at INFO). Read the reason in the `bootRun` console.
+
+The policy checks in this order (`DestinationPolicy.check`), so the first failing rule gives the reason:
+
+1. scheme must be `https`;
+2. port must be 443 (explicit or implied);
+3. no user info;
+4. the host must be in the allowlist;
+5. every resolved address must be public.
+
+| ID | Request `url` | HTTP | Log reason | Why this reason |
+|---|---|---|---|---|
+| B1 | `http://example.org/cobre` | 400 | `only https is allowed` | Rule 1 fails first. |
+| B2 | `https://example.org:8443/cobre` | 400 | `only port 443 is allowed` | Rule 2 runs before the allowlist, so the host does not matter. |
+| B3 | `https://example.org/cobre` | 400 | `host is not in the allowlist` | `example.org` is not in the default allowlist (`webhook.example.com`). |
+| B4 | `https://10.0.0.5/cobre` | 400 | `host is not in the allowlist` | Rule 4 runs before DNS. A private IP literal fails here, not on rule 5. |
+| B5 | `https://webhook.example.com/cobre` | 400 | `host resolves to a non-public address` or `host does not resolve` | The host is allowlisted by default, so the policy resolves it. The reason depends on DNS (see Scenario A). |
+
+Example request (B3):
+
+```bash
+curl -s -X POST http://localhost:8081/subscriptions \
+  -H "Authorization: Bearer $CLIENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.org/cobre", "event_types": ["payment_created"]}'
+```
+
+Each rejected request is audited with outcome `REJECTED` (`SubscriptionService`). The rule that a rejected host with a non-public address cannot be reached through the allowlist is covered by `DestinationPolicyTests`, not by this manual run.
+
+### Scenario C: successes and retries, with a tunnel
+
+**C1. Start the receiver and the tunnel.** From the project root, in PowerShell:
+
+```powershell
+.\start-local-webhook-tunnel.bat
+```
+
+The script opens two windows, **Receiver 9200** (`scripts/test-webhook-receiver.py`) and **Tunnel cloudflared**, waits up to 60 s for the tunnel URL, and prints `WEBHOOK_ALLOWED_HOSTS=<host>.trycloudflare.com`. It also opens a **Service** console that inherits that variable. The script needs `python` and `cloudflared` on `PATH`; this is not verified on every machine. If it prints `Tunnel URL not found`, read the **Tunnel cloudflared** window.
+
+Copy the host, without `https://`. You need it in the next steps.
+
+**C2. Restart the service with the tunnel host allowed.** Stop the Scenario A/B service with Ctrl+C. In the **Service** console, which already has `WEBHOOK_ALLOWED_HOSTS`, set the profile and the seed secret, then start:
+
+```powershell
+set SPRING_PROFILES_ACTIVE=local,demo
+set DEMO_WEBHOOK_SECRET=whsec_<the same value as before>
+gradlew.bat bootRun
+```
+
+The `demo` profile sets the retry delays to `PT10S,PT30S,PT1M,PT2M` (`application-demo.yaml`).
+
+**C3. Create two subscriptions.** Use the host from C1:
+
+```bash
+TUNNEL_HOST=<host from C1>
+curl -s -X POST http://localhost:8081/subscriptions -H "Authorization: Bearer $CLIENT_TOKEN" -H "Content-Type: application/json" -d "{\"url\": \"https://$TUNNEL_HOST/ok\", \"event_types\": [\"payment_created\"]}"
+curl -s -X POST http://localhost:8081/subscriptions -H "Authorization: Bearer $CLIENT_TOKEN" -H "Content-Type: application/json" -d "{\"url\": \"https://$TUNNEL_HOST/fail\", \"event_types\": [\"payment_created\"]}"
+```
+
+Expected: `201` for both, each with a `secret` returned once. `payment_created` is not an event type of any seed event, so the seed subscriptions do not receive these events.
+
+The test receiver answers `200` for every path and `500` for paths ending in `/fail`. It prints `<path> <status> <body length>`. It does **not** check the `Cobre-Signature` header, so this script does not demonstrate signature verification. The runbook's [Verifying the signature](#verifying-the-signature) section covers that.
+
+**C4. Send one event.**
+
+```bash
+curl -s -X POST http://localhost:8081/events \
+  -H "Authorization: Bearer $PRODUCER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "DEMO-C-0001", "client_id": "CLIENT001", "event_type": "payment_created", "content": "{\"amount\": 100}"}'
+```
+
+Expected: `202`, with two notification event ids, one per subscription.
+
+**Expected results.**
+
+| Subscription | Receiver window | Final `delivery_status` | Attempts |
+|---|---|---|---|
+| `/ok` | `/ok 200 <n>` once | `completed`, `delivered_at` set | 1 (`http_status` 200, `delivery_attempts` round 1) |
+| `/fail` | `/fail 500 <n>` five times | `failed`, `last_error` `retries_exhausted` | 5 (`attempt_number` 1 to 5, `http_status` 500) |
+
+For `/fail`, the first three attempts were measured in the verified run above at about +0 s, +11 s and +42 s. The fourth and fifth attempts follow the configured delays of 1 min and 2 min; this runbook does not measure them. The whole sequence takes about four minutes. `last_error` is `retries_exhausted` because a `500` response has no transport error type (`Delivery`).
+
+**Grafana while C runs:**
+
+- **Delivery attempts per second by outcome**: `success` for `/ok`, `retryable` for `/fail` (a `500` is `RETRYABLE` in `DeliveryOutcome.classify`).
+- **Attempt failure rate including retries above 5%** (`cobre-attempt-failure-rate`): firing if the window holds only these attempts, because five of six are not `success`. Scenario A's attempt is also in the window if it ran recently.
+- **Failed notification rate above 5%** (`cobre-failed-rate`): firing once `/fail` ends as `failed`.
+- **Message reached the dead-letter topic**: should not move. Compare with the baseline.
+
+### Verification in Grafana
+
+- **Dashboard**: open **Dashboards**, then **Notification delivery** (uid `cobre-delivery`). The file is `docker/grafana/dashboards/notification-delivery.json`. Metrics leave the service every 10 s (`management.otlp.metrics.export.step`), and the dashboard should show a new attempt within 30 s.
+- **Alert rules**: open **Alerting**, then **Alert rules**, and filter by folder **Notification delivery**. There are four rules:
+
+  | UID | Title | Fires when |
+  |---|---|---|
+  | `cobre-failed-rate` | Failed notification rate above 5% | the ratio of `failed` to all end-to-end outcomes is above 5% for 5 min, for 1 min |
+  | `cobre-attempt-failure-rate` | Attempt failure rate including retries above 5% | the ratio of non-`success` attempts is above 5% for 5 min, for 1 min |
+  | `cobre-dead-letter` | Message reached the dead-letter topic | `notification_dead_letter_total` increases in the last 2 min |
+  | `cobre-outbox-age` | Oldest unpublished outbox row older than 60 s | the outbox relay is behind by more than 60 s |
+
+- The seed does not produce metrics. Only attempts made by the running service are counted.
+
+### Cleanup
+
+1. Deactivate the test subscriptions only. Do not deactivate the seed subscriptions:
+
+   ```bash
+   curl -s -X PATCH http://localhost:8081/subscriptions/<subscription id> \
+     -H "Authorization: Bearer $CLIENT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"active": false}'
+   ```
+
+   `PATCH` accepts `active` and `event_types` (`SubscriptionChanges`). Deactivating does not stop notifications that were already created. Decisions D57 and D67 say that deactivation does not block round-one deliveries; this was not checked in code. Wait until nothing is left to deliver:
+
+   ```sql
+   SELECT count(*) FROM notifications WHERE delivery_status IN ('pending', 'retrying');
+   ```
+
+2. Stop the window processes: Ctrl+C in the **Service** console, and close the **Receiver 9200** and **Tunnel cloudflared** windows. Closing either of the two stops the test. The tunnel host is different on every run, so the test subscriptions cannot be reused.
+
+3. Optionally stop this checkout's containers with `docker compose stop` from the checkout root. This stops only this checkout's Compose project. Do not stop containers from another checkout.
+
+### Known gaps for the demo
+
+- **DNS failures.** D66 (`dns_error`, retryable) is recorded in [the decision log](../architecture/decision-log.md) and specified by the change `openspec/changes/add-transient-dns-retry`. The code on `origin/develop` does not implement it: `TransportError` has no `dns_error`, and a DNS failure is `invalid_destination`, permanent, with no retry. Scenario A describes the current behaviour. If that change is merged, Scenario A changes to `dns_error` with five attempts, and this section must be updated.
+- **Test receiver.** It does not verify signatures (see Scenario C).
+- **Attempt timings.** The fourth and fifth attempts of `/fail` are not measured.
+- **Grafana access.** The login is not in this repository.
 
 ## What this runbook does not cover
 
