@@ -76,6 +76,7 @@ The project includes Spring Boot Docker Compose support, so `./gradlew bootRun` 
 | Variable | Required | Purpose |
 |---|---|---|
 | `WEBHOOK_SECRETS_KEY` | Yes, outside the `local` profile | Base64-encoded 256-bit AES key that encrypts webhook signing secrets at rest. The application does not start without it. Generate one with `openssl rand -base64 32`. |
+| `DEMO_WEBHOOK_SECRET` | Yes with the `local` profile | Development-only signing secret of the sample subscriptions (`app.seed.secret`). The `local` profile seeds those subscriptions at startup, and the application refuses to start without this value so they are never delivered unsigned. Use a throwaway value, for example one generated like a real secret (`whsec_` prefix). |
 | `WEBHOOK_ALLOWED_HOSTS` | No (empty rejects every URL) | Comma-separated hosts that subscriptions may point to. An entry starting with `.` (for example `.example.org`) also allows that domain's subdomains. Only `https` on port 443 is accepted, and every resolved address must be public. The `local` profile allows `webhook.example.com`, which the sample data uses. |
 
 The `local` profile ships a development-only key; never reuse it elsewhere.

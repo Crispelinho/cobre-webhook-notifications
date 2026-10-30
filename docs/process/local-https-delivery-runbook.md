@@ -75,11 +75,12 @@ The script uses port 9200 so it does not collide with the port 9000 of the examp
 
 ## Step 3: start the service with that host allowed
 
-The `local` profile enables the development JWT issuer and the seed. `WEBHOOK_ALLOWED_HOSTS` overrides the profile default (`webhook.example.com`):
+The `local` profile enables the development JWT issuer and the seed. The seed needs `DEMO_WEBHOOK_SECRET`, or startup fails with a message that names it. `WEBHOOK_ALLOWED_HOSTS` overrides the profile default (`webhook.example.com`):
 
 ```bash
 SPRING_PROFILES_ACTIVE=local
 SERVER_PORT=8081
+DEMO_WEBHOOK_SECRET=whsec_local_throwaway_value
 WEBHOOK_ALLOWED_HOSTS=abc123.ngrok-free.app
 ./gradlew bootRun
 ```
