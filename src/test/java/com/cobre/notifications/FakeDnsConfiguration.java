@@ -21,7 +21,8 @@ class FakeDnsConfiguration {
 
 	private static final Map<String, String> ADDRESSES = Map.of("hooks.example.org", "93.184.215.14",
 			"presentation.example.com", "93.184.215.20", "loopback.example.org", "127.0.0.1",
-			"private.example.org", "10.0.0.5", "metadata.example.org", "169.254.169.254");
+			"private.example.org", "10.0.0.5", "metadata.example.org", "169.254.169.254",
+			"anything.example.net", "93.184.215.30");
 
 	/** Allowlisted but absent from the map: the name does not resolve, like a transient DNS failure (D54). */
 	static final String UNRESOLVED_HOST = "unresolved.example.org";
