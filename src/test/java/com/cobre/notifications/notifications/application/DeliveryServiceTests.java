@@ -146,13 +146,24 @@ class DeliveryServiceTests {
 	}
 
 	@Test
-	void aRetryAfterOfZeroIsHonouredAsDueNow() {
+	void aRetryAfterShorterThanTheBackoffStepSchedulesExactlyThatFarAheadReplacingTheStep() {
+		// Next backoff step would be 60 s; the receiver asked for 5 s, which replaces it (D53).
 		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
-		nextResult = AttemptResult.response(NOW, 503, 20, Duration.ZERO);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(5));
 
 		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
 
-		assertThat(store.delay).isEqualTo(Duration.ZERO);
+		assertThat(store.delay).isEqualTo(Duration.ofSeconds(5));
+	}
+
+	@Test
+	void theRetryAfterCapMustBePositive() {
+		for (Duration invalid : new Duration[] { Duration.ZERO, Duration.ofSeconds(-1) }) {
+			assertThatIllegalArgumentException()
+				.isThrownBy(() -> new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5,
+						DeliveryMetrics.NONE, DeliveryService.DEFAULT_LEASE_DURATION, invalid))
+				.withMessageContaining("retryAfterCap");
+		}
 	}
 
 	@Test

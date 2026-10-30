@@ -89,8 +89,8 @@ public class DeliveryService implements DeliverNotification, FailExhaustedNotifi
 		this.clock = Objects.requireNonNull(clock);
 		this.maxAttempts = maxAttempts;
 		this.metrics = Objects.requireNonNull(metrics);
-		if (retryAfterCap.isNegative()) {
-			throw new IllegalArgumentException("retryAfterCap must not be negative");
+		if (retryAfterCap.isZero() || retryAfterCap.isNegative()) {
+			throw new IllegalArgumentException("retryAfterCap must be positive");
 		}
 		this.retryAfterCap = retryAfterCap;
 	}

@@ -9,8 +9,8 @@ import java.util.Objects;
  *
  * @param httpStatus null when no response was received
  * @param error null when a response was received
- * @param retryAfter the delay the receiver asked for with a valid {@code Retry-After} on a 429 or 503, not yet capped;
- * null otherwise
+ * @param retryAfter the delay the receiver asked for with a valid, positive {@code Retry-After} on a 429 or 503, not yet
+ * capped; null otherwise. Zero is never a delay: it uses the configured backoff (D53).
  */
 public record AttemptResult(Instant attemptedAt, Integer httpStatus, TransportError error, int latencyMs,
 		Duration retryAfter) {
@@ -27,9 +27,9 @@ public record AttemptResult(Instant attemptedAt, Integer httpStatus, TransportEr
 		if (latencyMs < 0) {
 			throw new IllegalArgumentException("latency must not be negative");
 		}
-		if (retryAfter != null && (retryAfter.isNegative() || httpStatus == null
+		if (retryAfter != null && (retryAfter.isNegative() || retryAfter.isZero() || httpStatus == null
 				|| (httpStatus != 429 && httpStatus != 503))) {
-			throw new IllegalArgumentException("retry-after is a non-negative delay that only a 429 or 503 carries");
+			throw new IllegalArgumentException("retry-after is a positive delay that only a 429 or 503 carries");
 		}
 	}
 

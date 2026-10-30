@@ -129,12 +129,12 @@ class JdbcScheduledAttemptAdapterTests {
 	}
 
 	@Test
-	void aZeroDelayIsStoredAsNowAndOnlyTheSchedulerMakesItDueNeverADirectSend() {
+	void aScheduledAttemptIsEnqueuedOnlyBySchedulerAndNeverSentDirectly() {
 		insertNotification("N1", "pending", 1, null);
 		java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
 		DeliveryService service = new DeliveryService(store, delivery -> {
 			sent.incrementAndGet();
-			return AttemptResult.response(T0, 429, 5, Duration.ZERO);
+			return AttemptResult.response(T0, 429, 5, Duration.ofSeconds(1));
 		}, Clock.fixed(T0, ZoneOffset.UTC), 5, DeliveryMetrics.NONE, Duration.ofSeconds(60), Duration.ofSeconds(300));
 
 		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
@@ -142,6 +142,7 @@ class JdbcScheduledAttemptAdapterTests {
 		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
 		assertThat(sent).hasValue(1);
 
+		jdbc.sql("UPDATE notifications SET next_attempt_at = now() - interval '1 second' WHERE id = 'N1'").update();
 		assertThat(scheduled.enqueueDue(100)).isEqualTo(1);
 		assertThat(scheduled.enqueueDue(100)).isZero();
 	}
@@ -184,7 +185,7 @@ class JdbcScheduledAttemptAdapterTests {
 		insertNotification("N1", "pending", 1, null);
 		java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
 		DeliveryService service = new DeliveryService(store, delivery -> sent.incrementAndGet() == 1
-				? AttemptResult.response(T0, 429, 5, Duration.ZERO) : AttemptResult.response(T0, 200, 5),
+				? AttemptResult.response(T0, 429, 5, Duration.ofSeconds(1)) : AttemptResult.response(T0, 200, 5),
 				Clock.fixed(T0, ZoneOffset.UTC), 5, DeliveryMetrics.NONE, Duration.ofSeconds(60), Duration.ofSeconds(300));
 		DispatchMessage message = new DispatchMessage("N1", 1);
 
@@ -197,6 +198,7 @@ class JdbcScheduledAttemptAdapterTests {
 		assertThat(store.find("N1").orElseThrow().nextAttemptAt()).isEqualTo(scheduledTime);
 
 		// 2. After the release, the message it enqueued is processed and sends once.
+		jdbc.sql("UPDATE notifications SET next_attempt_at = now() - interval '1 second' WHERE id = 'N1'").update();
 		assertThat(scheduled.enqueueDue(100)).isEqualTo(1);
 		assertThat(service.deliver(message)).isEqualTo(DeliveryResult.DELIVERED);
 		assertThat(sent).hasValue(2);
@@ -210,10 +212,13 @@ class JdbcScheduledAttemptAdapterTests {
 			insertNotification(id, "pending", 1, null);
 			java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
 			DeliveryService service = new DeliveryService(store, delivery -> sent.incrementAndGet() == 1
-					? AttemptResult.response(T0, 429, 5, Duration.ZERO) : AttemptResult.response(T0, 200, 5),
+					? AttemptResult.response(T0, 429, 5, Duration.ofSeconds(1)) : AttemptResult.response(T0, 200, 5),
 					Clock.fixed(T0, ZoneOffset.UTC), 5, DeliveryMetrics.NONE, Duration.ofSeconds(60), Duration.ofSeconds(300));
 			DispatchMessage message = new DispatchMessage(id, 1);
 			assertThat(service.deliver(message)).isEqualTo(DeliveryResult.SCHEDULED);
+			jdbc.sql("UPDATE notifications SET next_attempt_at = now() - interval '1 second' WHERE id = :id")
+				.param("id", id)
+				.update();
 
 			// One consumer handles the messages of a notification event in order (Kafka key = partition); the
 			// scheduler releases from another thread at the same moment as the duplicate is handled.
@@ -323,6 +328,26 @@ class JdbcScheduledAttemptAdapterTests {
 		assertThat(jdbc.sql("SELECT count(*) FROM outbox").query(Long.class).single()).isEqualTo(rows);
 		assertThat(jdbc.sql("SELECT count(DISTINCT notification_id) FROM outbox").query(Long.class).single())
 			.isEqualTo(rows);
+	}
+
+	@Test
+	void aScheduledRetryWaitsForItsInstantAcrossARestartAndIsEnqueuedOnceItIsDue() {
+		insertNotification("N1", "pending", 1, null);
+		DeliveryService service = new DeliveryService(store,
+				delivery -> AttemptResult.response(T0, 429, 5, Duration.ofSeconds(60)), Clock.fixed(T0, ZoneOffset.UTC),
+				5, DeliveryMetrics.NONE, Duration.ofSeconds(60), Duration.ofSeconds(300));
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+		Instant scheduledTime = store.find("N1").orElseThrow().nextAttemptAt();
+
+		// A restart drops every in-memory object: a new scheduler reads the time the database kept, and nothing else
+		// holds it.
+		JdbcScheduledAttemptAdapter restarted = new JdbcScheduledAttemptAdapter(jdbc);
+		assertThat(restarted.enqueueDue(100)).isZero();
+		assertThat(jdbc.sql("SELECT count(*) FROM outbox").query(Long.class).single()).isZero();
+		assertThat(store.find("N1").orElseThrow().nextAttemptAt()).isEqualTo(scheduledTime);
+
+		jdbc.sql("UPDATE notifications SET next_attempt_at = now() - interval '1 second' WHERE id = 'N1'").update();
+		assertThat(restarted.enqueueDue(100)).isEqualTo(1);
 	}
 
 	private Lease claim(Delivery delivery) {
