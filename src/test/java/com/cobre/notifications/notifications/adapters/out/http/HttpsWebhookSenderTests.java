@@ -491,6 +491,97 @@ class HttpsWebhookSenderTests {
 		assertThat(receiver.getAllServeEvents()).isEmpty();
 	}
 
+	@Test
+	void everyAttemptAndEveryRoundCarriesTheSameIdTheSameBodyAndItsOwnSignatureTime() {
+		receiver.stubFor(post("/rounds").andMatching(request -> MatchResult.of(verifies(request, "whsec_known")))
+			.willReturn(aResponse().withStatus(503)));
+		receiver.stubFor(post("/rounds").atPriority(10).willReturn(aResponse().withStatus(401)));
+		MutableClock clock = new MutableClock(NOW);
+		HttpsWebhookSender sender = new HttpsWebhookSender(trusting, json, policy, cipher, new WebhookSigner(),
+				Duration.ofSeconds(5), clock);
+		Delivery firstAttempt = delivery(url("/rounds"), "whsec_known");
+
+		sender.send(firstAttempt);
+		// The backoff is longer than the 5-minute tolerance: reusing the first t would be rejected.
+		clock.set(NOW.plus(Duration.ofMinutes(8)));
+		sender.send(withProgress(firstAttempt, 1, 1));
+		// A replay of the same notification event, a day later, in a new round.
+		clock.set(NOW.plus(Duration.ofDays(1)));
+		sender.send(withProgress(firstAttempt, 2, 0));
+
+		List<Request> requests = receiver.findAll(postRequestedFor(urlEqualTo("/rounds")))
+			.stream()
+			.map(event -> (Request) event)
+			.toList();
+		assertThat(requests).hasSize(3);
+		// A 401 would mean the signature did not verify against its own t.
+		assertThat(receiver.getAllServeEvents()).allSatisfy(event -> assertThat(event.getResponse().getStatus()).isEqualTo(503));
+		assertThat(requests).extracting(request -> request.getHeader("Cobre-Notification-Id")).containsOnly("N1");
+		assertThat(requests).extracting(Request::getBody).containsOnly(requests.getFirst().getBody());
+		assertThat(new String(requests.getFirst().getBody(), StandardCharsets.UTF_8)).isEqualTo(VECTOR_BODY);
+		assertThat(requests).extracting(HttpsWebhookSenderTests::signedAt)
+			.containsExactly(NOW.getEpochSecond(), NOW.plus(Duration.ofMinutes(8)).getEpochSecond(),
+					NOW.plus(Duration.ofDays(1)).getEpochSecond());
+	}
+
+	@Test
+	void aRetriedAttemptSignatureVerifiesIndependentlyWithinTheToleranceAtItsSendTime() {
+		receiver.stubFor(post("/retry").willReturn(aResponse().withStatus(503)));
+		MutableClock clock = new MutableClock(NOW.plus(Duration.ofMinutes(8)));
+		HttpsWebhookSender sender = new HttpsWebhookSender(trusting, json, policy, cipher, new WebhookSigner(),
+				Duration.ofSeconds(5), clock);
+
+		sender.send(withProgress(delivery(url("/retry"), "whsec_known"), 1, 1));
+
+		Request request = receiver.findAll(postRequestedFor(urlEqualTo("/retry"))).getFirst();
+		assertThat(verifies(request, "whsec_known")).isTrue();
+		assertThat(verifies(request, "whsec_other")).isFalse();
+		assertThat(Duration.between(Instant.ofEpochSecond(signedAt(request)), clock.instant()).abs())
+			.isLessThanOrEqualTo(Duration.ofMinutes(5));
+	}
+
+	private static long signedAt(Request request) {
+		String header = request.getHeader("Cobre-Signature");
+		return Long.parseLong(header.substring(2, header.indexOf(',')));
+	}
+
+	/** The same notification event after earlier attempts or in a later round, as the repository would load it. */
+	private static Delivery withProgress(Delivery d, int round, int attemptsInRound) {
+		return new Delivery(d.id(), d.eventId(), d.eventType(), d.content(), d.destinationUrl(), d.createdAt(),
+				DeliveryStatus.RETRYING, round, attemptsInRound, null, null, "http_503", d.version() + 1,
+				d.subscriptionId(), d.secretCiphertext());
+	}
+
+	/** A clock the test moves between attempts; the sender takes {@code t} from it at send time. */
+	private static final class MutableClock extends Clock {
+
+		private Instant now;
+
+		MutableClock(Instant now) {
+			this.now = now;
+		}
+
+		void set(Instant now) {
+			this.now = now;
+		}
+
+		@Override
+		public ZoneOffset getZone() {
+			return ZoneOffset.UTC;
+		}
+
+		@Override
+		public Clock withZone(java.time.ZoneId zone) {
+			return this;
+		}
+
+		@Override
+		public Instant instant() {
+			return now;
+		}
+
+	}
+
 	/**
 	 * What a real receiver does: recompute HMAC-SHA256 of "t.body" with its secret and compare in constant time.
 	 */

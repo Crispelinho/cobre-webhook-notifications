@@ -56,6 +56,17 @@ class SecretCipherTests {
 	}
 
 	@Test
+	void aCiphertextDecryptsWithItsOwnSubscriptionAndFailsWithAnotherOrNone() {
+		byte[] secret = "whsec_example".getBytes(StandardCharsets.UTF_8);
+		byte[] forS1 = cipher.encrypt(secret, OWNER);
+
+		assertThat(cipher.decrypt(forS1, OWNER)).isEqualTo(secret);
+		assertThatIllegalArgumentException().isThrownBy(() -> cipher.decrypt(forS1, "019a2b3c-0000-7000-8000-000000000002"));
+		assertThatIllegalArgumentException().isThrownBy(() -> cipher.decrypt(forS1, ""));
+		assertThatIllegalArgumentException().isThrownBy(() -> cipher.decrypt(forS1, null));
+	}
+
+	@Test
 	void formatVersionIsStoredFirstAndAuthenticated() {
 		byte[] encrypted = cipher.encrypt("whsec_example".getBytes(StandardCharsets.UTF_8), OWNER);
 
