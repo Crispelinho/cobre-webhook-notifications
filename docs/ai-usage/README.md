@@ -20,6 +20,7 @@ Screenshots of the design phase conversation, kept as evidence of how AI was use
 | Image | What it shows |
 |---|---|
 | [image1.png](images/image1.png) | The initial prompt: ODD + SDD approach, and the instruction to refine the problem before any file is created. |
+| [Image2.png](images/Image2.png) | The first analysis of the sample data: event counts, the two states present, `delivery_date` without a creation date, and the open questions it raised. |
 | [Image3.png](images/Image3.png) | The review of the nine ambiguities (A1 to A9) against the decisions already taken. |
 | [Image4.png](images/Image4.png) | The AI's recommendations compared with the decisions made, point by point. |
 | [Image5.png](images/Image5.png) | The same comparison, continued. |
