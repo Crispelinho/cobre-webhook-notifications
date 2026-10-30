@@ -2,12 +2,15 @@ package com.cobre.notifications.shared.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.LockSupport;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -176,6 +179,56 @@ class DestinationPolicyTests {
 		assertThatExceptionOfType(DestinationResolutionException.class)
 			.isThrownBy(() -> policy.check("https://gone.example.org/"))
 			.withMessage("host does not resolve");
+	}
+
+	@Test
+	void aLookupThatOutlivesTheResolveTimeoutIsAResolutionFailureNotAnSsrfRejection() {
+		HostResolver stuck = host -> {
+			LockSupport.parkNanos(Duration.ofSeconds(30).toNanos());
+			return List.of(InetAddress.getByName("93.184.215.14"));
+		};
+		DestinationPolicy slow = new DestinationPolicy(List.of("stuck.example.org"), stuck, Duration.ofMillis(200));
+		long started = System.nanoTime();
+
+		assertThatExceptionOfType(DestinationResolutionException.class)
+			.isThrownBy(() -> slow.check("https://stuck.example.org/"))
+			.withMessage("name resolution timed out");
+		assertThat(System.nanoTime() - started).isLessThan(Duration.ofSeconds(5).toNanos());
+	}
+
+	@Test
+	void aLookupWithinTheResolveTimeoutIsUnchanged() throws UnknownHostException {
+		DestinationPolicy quick = new DestinationPolicy(List.of("hooks.example.org"), resolver, Duration.ofMillis(200));
+
+		Destination destination = quick.check("https://hooks.example.org/cobre");
+
+		assertThat(destination.addresses()).containsExactly(InetAddress.getByName("93.184.215.14"));
+	}
+
+	@Test
+	void aNonPublicAnswerWithinTheResolveTimeoutIsStillAPermanentRejection() {
+		DestinationPolicy quick = new DestinationPolicy(List.of("internal.example.org"),
+				new FakeResolver(Map.of("internal.example.org", "10.0.0.5")), Duration.ofMillis(200));
+
+		expectRejected(quick, "https://internal.example.org/", "host resolves to a non-public address");
+	}
+
+	@Test
+	void aResolveTimeoutMustBePositive() {
+		assertThatIllegalArgumentException()
+			.isThrownBy(() -> new DestinationPolicy(List.of(), resolver, Duration.ZERO));
+	}
+
+	@Test
+	void aResolverThatAnswersNothingIsAResolutionFailureToo() {
+		// No address to connect to is the same as a name that does not resolve: retryable, not an SSRF rejection.
+		for (HostResolver answer : List.<HostResolver>of(host -> List.of(), host -> null)) {
+			DestinationPolicy candidate = new DestinationPolicy(List.of("gone.example.org"), answer);
+
+			assertThatExceptionOfType(DestinationResolutionException.class)
+				.isThrownBy(() -> candidate.check("https://gone.example.org/"))
+				.withMessage("host does not resolve");
+		}
 	}
 
 	@Test

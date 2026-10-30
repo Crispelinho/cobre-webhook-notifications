@@ -29,6 +29,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
@@ -232,7 +233,45 @@ class HttpsWebhookSenderTests {
 
 		assertThat(result.error()).isEqualTo(TransportError.DNS);
 		assertThat(result.errorType()).isEqualTo("dns_error");
+		assertThat(result.httpStatus()).isNull();
 		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.RETRYABLE);
+		assertThat(receiver.getAllServeEvents()).isEmpty();
+	}
+
+	@Test
+	void aDnsFailureThenAResolvedNameDeliversOnTheNextAttempt() {
+		receiver.stubFor(post("/hook").willReturn(aResponse().withStatus(200)));
+		AtomicBoolean resolves = new AtomicBoolean();
+		DestinationPolicy flaky = new DestinationPolicy(List.of("hooks.example.org"), host -> {
+			if (!resolves.get()) {
+				throw new UnknownHostException(host);
+			}
+			return List.of(InetAddress.getByName(DNS.get(host)));
+		});
+		HttpsWebhookSender flakySender = new HttpsWebhookSender(trusting, json, flaky, cipher, new WebhookSigner(),
+				Duration.ofSeconds(5), Clock.fixed(NOW, ZoneOffset.UTC));
+		Delivery pending = delivery(url("/hook"));
+
+		assertThat(flakySender.send(pending).error()).isEqualTo(TransportError.DNS);
+		assertThat(receiver.getAllServeEvents()).isEmpty();
+
+		resolves.set(true);
+		AttemptResult second = flakySender.send(pending);
+
+		assertThat(second.outcome()).isEqualTo(DeliveryOutcome.SUCCESS);
+		receiver.verify(1, postRequestedFor(urlEqualTo("/hook")));
+	}
+
+	@Test
+	void aNameThatNeverResolvesIsARetryableDnsAttemptEveryTimeAndNothingIsSent() {
+		// Five attempts end the round as failed: DeliveryService caps them for every RETRYABLE outcome.
+		HttpsWebhookSender down = sender(trusting, Duration.ofSeconds(5));
+		for (int attempt = 1; attempt <= 5; attempt++) {
+			AttemptResult result = down.send(delivery("https://dns-down.example.org/hook"));
+
+			assertThat(result.error()).as("attempt %d", attempt).isEqualTo(TransportError.DNS);
+			assertThat(result.outcome()).as("attempt %d", attempt).isEqualTo(DeliveryOutcome.RETRYABLE);
+		}
 		assertThat(receiver.getAllServeEvents()).isEmpty();
 	}
 

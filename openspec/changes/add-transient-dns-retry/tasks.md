@@ -20,4 +20,4 @@
 
 ## 4. Verification
 
-- [x] 4.1 `./gradlew test` passes (528 tests); fresh-context AI review still pending before the pull request
+- [ ] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
