@@ -139,10 +139,90 @@ class ReplayDeliveryIntegrationTests {
 
 		awaitStatus(id, "completed");
 
-		assertThat(attempts(id)).extracting(a -> a.get("http_status")).containsExactly(400, 200);
+		// A transient transport error before the first HTTP answer can add an attempt without a status (seen when Kafka
+		// is still electing its group coordinator). The assertion is on the end of the history: the round that
+		// received 400 and the replay that received 200.
+		assertThat(attempts(id)).extracting(a -> a.get("http_status")).endsWith(400, 200);
 		receiver.verify(1, postRequestedFor(urlEqualTo("/deactivated")).withHeader("Cobre-Signature",
 				matching("t=[0-9]+,v1=[0-9a-f]{64}")));
 		receiver.verify(0, postRequestedFor(urlEqualTo("/changed")));
+	}
+
+	@Test
+	void aReplayToADestinationThatNowResolvesPrivatelyFailsWithoutSendingARequest() throws Exception {
+		receiver.stubFor(post("/replay-private").willReturn(aResponse().withStatus(400)));
+		String client = "C-" + UUID.randomUUID().toString().substring(0, 8);
+		String id = ingestFor(client, "/replay-private");
+		awaitStatus(id, "failed");
+		// The notification keeps the URL it was created with. Simulate that this URL now resolves to a private address.
+		jdbc.sql("UPDATE notifications SET destination_url = :url WHERE id = :id")
+			.param("url", "https://private.example.org/replay-private")
+			.param("id", id)
+			.update();
+
+		mvc.perform(MockMvcRequestBuilders.post("/notification_events/" + id + "/replay")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + ISSUER.token(client, "notifications:replay")))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.round").value(2));
+
+		awaitAttemptInRound(id, 2);
+		awaitStatus(id, "failed");
+		assertThat(jdbc.sql("SELECT http_status IS NULL FROM delivery_attempts WHERE notification_id = :id AND round = 2")
+			.param("id", id)
+			.query(Boolean.class)
+			.single()).isTrue();
+		assertThat(jdbc.sql("SELECT error_type FROM delivery_attempts WHERE notification_id = :id AND round = 2")
+			.param("id", id)
+			.query(String.class)
+			.single()).isEqualTo("invalid_destination");
+		// Only the first round's attempt reached the receiver.
+		receiver.verify(1, postRequestedFor(urlEqualTo("/replay-private")));
+	}
+
+	/**
+	 * A subscription whose secret was removed is replayed: the replay is accepted, the attempt fails permanently as
+	 * missing_secret and nothing is sent. Passing through the join of the delivery query also shows that the
+	 * notification is still found when its subscription has no secret.
+	 */
+	@Test
+	void aReplayOfANotificationWhoseSubscriptionHasNoSecretFailsPermanentlyWithoutSendingARequest() throws Exception {
+		receiver.stubFor(post("/replay-unsigned").willReturn(aResponse().withStatus(400)));
+		String client = "C-" + UUID.randomUUID().toString().substring(0, 8);
+		String id = ingestFor(client, "/replay-unsigned");
+		awaitStatus(id, "failed");
+		jdbc.sql("UPDATE subscriptions SET secret_ciphertext = NULL WHERE id = :id")
+			.param("id", "SUB-" + client)
+			.update();
+
+		mvc.perform(MockMvcRequestBuilders.post("/notification_events/" + id + "/replay")
+			.header(HttpHeaders.AUTHORIZATION, "Bearer " + ISSUER.token(client, "notifications:replay")))
+			.andExpect(status().isAccepted())
+			.andExpect(jsonPath("$.round").value(2));
+
+		awaitAttemptInRound(id, 2);
+		awaitStatus(id, "failed");
+		String errorType = jdbc.sql("SELECT error_type FROM delivery_attempts WHERE notification_id = :id AND round = 2")
+			.param("id", id)
+			.query(String.class)
+			.single();
+		assertThat(errorType).isEqualTo("missing_secret");
+		assertThat(jdbc.sql("SELECT last_error FROM notifications WHERE id = :id")
+			.param("id", id)
+			.query(String.class)
+			.single()).isEqualTo("missing_secret");
+		// Only the first round's attempt reached the receiver.
+		receiver.verify(1, postRequestedFor(urlEqualTo("/replay-unsigned")));
+	}
+
+	private void awaitAttemptInRound(String id, int round) {
+		await().atMost(Duration.ofSeconds(60))
+			.pollInterval(Duration.ofMillis(200))
+			.untilAsserted(() -> assertThat(jdbc
+				.sql("SELECT count(*) FROM delivery_attempts WHERE notification_id = :id AND round = :round")
+				.param("id", id)
+				.param("round", round)
+				.query(Long.class)
+				.single()).isPositive());
 	}
 
 	private static boolean verifies(Request request, String secret) {
