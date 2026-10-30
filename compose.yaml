@@ -1,0 +1,48 @@
+# Local development stack only. Credentials below are throwaway values for this environment.
+services:
+  postgres:
+    image: 'postgres:18.6'
+    environment:
+      - 'POSTGRES_DB=notifications'
+      - 'POSTGRES_USER=notifications'
+      - 'POSTGRES_PASSWORD=notifications'
+    ports:
+      - '5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U notifications -d notifications']
+      interval: 5s
+      retries: 10
+
+  kafka:
+    image: 'apache/kafka-native:4.4.0'
+    ports:
+      - '9092:9092'
+    # Single broker for local development. With the image defaults, __consumer_offsets has 50 partitions and the group
+    # coordinator kept moving: hundreds of "not the correct coordinator" errors in a few minutes. One partition and no
+    # initial rebalance delay match the Testcontainers broker. Development only: size the partitions for production.
+    # Setting one KAFKA_* variable alone makes the broker fail at startup, so the whole block is set.
+    environment:
+      KAFKA_NODE_ID: '1'
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_LISTENERS: 'PLAINTEXT://:9092,CONTROLLER://:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://localhost:9092'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@localhost:9093'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: '1'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
+
+  grafana-lgtm:
+    image: 'grafana/otel-lgtm:0.38.1'
+    ports:
+      - '3000:3000'
+      - '4317'
+      - '4318'
+    # Dashboard and alert rules are provisioned as files; each mount adds one file to the image's own directories.
+    volumes:
+      - './docker/grafana/provisioning/dashboards/notification-delivery.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/notification-delivery.yaml:ro'
+      - './docker/grafana/provisioning/alerting/notification-delivery-alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/notification-delivery-alerts.yaml:ro'
+      - './docker/grafana/dashboards:/var/lib/cobre/dashboards:ro'

@@ -1,0 +1,27 @@
+# Tasks: Add observability and audit
+
+## 1. Metrics and alerts (Should)
+
+- [x] 1.1 Micrometer meters in the dispatch, dead-letter and outbox paths; OTLP export to LGTM
+- [x] 1.2 Grafana dashboard and alert rules provisioned through `compose.yaml`
+- [ ] 1.3 Manual check of the metric and dead-letter alert scenarios against the local stack, with screenshots for the presentation
+
+## 2. Logs and audit (Should)
+
+- [x] 2.1 Structured JSON logs with trace, notification event and client IDs; content never logged
+- [x] 2.2 `AuditLog` port and structured adapter; calls from replay and subscription use cases
+- [x] 2.3 Tests for the audit scenarios and a test that event content does not reach the logs
+
+## 3. Could
+
+- [x] 3.1 Trace propagation through Kafka headers (relay publish to consumer; the asynchronous hop from `POST /events` to the relay is not linked)
+- [x] 3.2 Bucket4j per-client rate limiting with tests
+
+## 4. Verification
+
+- [ ] 4.1 `./gradlew build` passes; fresh-context AI review before the pull request
+
+## Archive notes (2026-10-29)
+
+- 1.3: not done. PR #13 and `docs/ai-usage/07` list the manual dashboard and alert check with screenshots as pending.
+- 4.1: the build passed before merge according to PR #13 (446 tests). The fresh-context review is recorded as pending.

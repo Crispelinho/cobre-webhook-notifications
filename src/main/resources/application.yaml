@@ -1,0 +1,124 @@
+spring:
+  application:
+    name: notification-service
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  kafka:
+    template:
+      # The producer span puts the W3C trace context into the record headers...
+      observation-enabled: true
+    listener:
+      # ...and the consumer continues that trace, so the relay publish, every attempt and the webhook call that
+      # follows share one trace ID in logs and traces.
+      observation-enabled: true
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        # Fail fast when the broker is unreachable; the relay keeps the row unpublished and polls again.
+        max.block.ms: 5000
+        delivery.timeout.ms: 15000
+        request.timeout.ms: 5000
+
+app:
+  security:
+    jwt:
+      # Required, no defaults: the application must not start trusting a development issuer by accident.
+      # The local profile points both values at the dev-token tool.
+      public-key-location: ${JWT_PUBLIC_KEY_LOCATION}
+      issuer: ${JWT_ISSUER}
+      audience: notification-service
+  dispatch:
+    # Partitions of notification.dispatch (about 48 in production; small for local development).
+    partitions: 3
+  outbox:
+    relay:
+      enabled: true
+      poll-interval: PT0.5S
+      batch-size: 100
+      publish-timeout: PT5S
+  delivery:
+    # Set to false to run the application without the dispatch consumer (no webhooks are sent).
+    consumer:
+      enabled: true
+    http:
+      connect-timeout: PT2S
+      request-timeout: PT10S
+    lease:
+      # How long a worker's claim on a notification event lasts. Keep it well above the request timeout.
+      duration: PT60S
+      recovery:
+        enabled: true
+        # How often expired leases are released and dispatched again.
+        interval: PT30S
+        batch-size: 100
+    retry:
+      # Attempts per round, the first one included.
+      max-attempts: 5
+      # Default profile: exponential backoff, 30 s up to 1 h, with jitter. Overridden by `delays` when it is set
+      # (the local profile does).
+      initial-delay: PT30S
+      multiplier: 4
+      max-delay: PT1H
+      jitter: PT5S
+    # Longest wait a receiver's Retry-After (429 or 503 only) can impose; a larger value is honoured up to this.
+    retry-after-cap: PT300S
+    next-attempt:
+      # Polls for attempts whose Retry-After time has come and enqueues them.
+      enabled: true
+      poll-interval: PT1S
+      batch-size: 100
+  rate-limit:
+    # Per-client limit on the self-service API (/notification_events, /subscriptions); excess requests get 429.
+    # Counted in memory per instance (D29).
+    enabled: true
+    requests-per-minute: 100
+  seed:
+    # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
+    enabled: false
+    # Development-only webhook secret of the seed subscriptions, from the DEMO_WEBHOOK_SECRET environment variable. No
+    # value lives in the repository and there is no default: with app.seed.enabled=true (local) the seeder fails
+    # startup when it is missing, so a seed subscription is never delivered unsigned. Use a throwaway value, for
+    # example one generated like a real secret (whsec_ prefix); the demo receiver verifies the signature with it.
+    secret: ${DEMO_WEBHOOK_SECRET:}
+  webhook:
+    # Comma-separated hosts that webhooks may be sent to; an entry starting with "." also allows its subdomains.
+    allowed-hosts: ${WEBHOOK_ALLOWED_HOSTS:}
+    # Base64-encoded 256-bit AES key that encrypts webhook secrets at rest. Required, no default.
+    secrets-key: ${WEBHOOK_SECRETS_KEY}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  otlp:
+    metrics:
+      export:
+        # Push often enough that a delivery is visible in Grafana within 30 seconds, and report timers in seconds
+        # so the Prometheus names end in _seconds.
+        step: PT10S
+        base-time-unit: seconds
+  tracing:
+    sampling:
+      # Every request is traced: this is a demo-scale service and logs correlate by trace ID.
+      probability: 1.0
+
+logging:
+  structured:
+    format:
+      # One JSON object per line, with the MDC (trace ID, notification event ID, client ID) and structured key-values.
+      console: logstash
