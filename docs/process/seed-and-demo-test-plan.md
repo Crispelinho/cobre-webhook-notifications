@@ -81,7 +81,7 @@ Each case lists the action and the expected result. The `Status` column says whe
 | R1 | `POST /subscriptions` with the tunnel host, `event_types` taken from the seed | `201`. Response contains a `secret` starting with `whsec_` | Verified in the runbook |
 | R2 | `GET /subscriptions/<id>` after R1 | The secret is not returned | Expected (decision D11: returned once) |
 | R3 | `POST /subscriptions` with port 8443, a host outside the allowlist, or `127.0.0.1` | `400` with a generic message. The reason is only in the log | Verified in the runbook |
-| R4 | Create a 51st active subscription for one client | Rejected with `400` through `InvalidSubscriptionException`. The code does not return `409 SUBSCRIPTION_LIMIT_REACHED` | Not implemented (reconciliation decision 3: subscription cap overflow, approved as `409`) |
+| R4 | Create a 51st active subscription for one client | `409` with `code` `SUBSCRIPTION_LIMIT_REACHED` (reconciliation decision 3). The check is atomic, so concurrent requests cannot exceed the limit | Verified by `SubscriptionManagementAcceptanceTests` (#19). Not run in the runbook |
 | R5 | Seed subscription `SUB-CLIENT001` counted against the limit | Expected to count as an active subscription for the limit check. Confirm before relying on the number | Expected (inference from `countActive`, not run) |
 
 ### 2.3 Ingestion
@@ -102,7 +102,7 @@ Each case lists the action and the expected result. The `Status` column says whe
 | D2 | Subscription to `/fail`, same event type | Five attempts. Final status `failed`, `delivery_date` set, `last_error` `retries_exhausted`. `delivery_attempts`: five rows, `attempt_number` 1 to 5. The first three attempts are at about +0 s, +11 s and +42 s | Verified in the runbook for the three first attempts. The observed run timed all five, and the gaps do not match the configured delays (cause not verified) |
 | D3 | Metric counter during D2 | `notification.delivery.attempts` for outcome `retryable` increases by 5 | Expected (`MicrometerDeliveryMetrics`) |
 | D4 | Signature check on D1 with one changed byte in the body | Verification fails. The original body verifies | Verified in the runbook |
-| D5 | Retry-After on a `429` response from the receiver | Honoured with a cap of 300 seconds (decision D49). Not in the code | Not implemented |
+| D5 | Retry-After on a `429` response from the receiver | Honoured with a cap of 300 seconds (decision D49), scheduled through `next_attempt_at` (decision D68) | Verified by `DeliveryIntegrationTests` (#30 and the cap test). Not run in the runbook |
 
 ### 2.5 Replay
 
@@ -121,7 +121,7 @@ Each case lists the action and the expected result. The `Status` column says whe
 |---|---|---|---|
 | X1 | Repeat the producer call I1 five times | Only the first is `202`. The rest are `409`. One notification per subscription | Verified in code, expected in run |
 | X2 | Two consumers receive the same dispatch message (simulated with a duplicate message) | Only one attempt is recorded. The second write loses on `version` and is not recorded | Verified in `JdbcDeliveryStoreAdapter` (conditional update and unique key) |
-| X3 | Stop the app while an attempt is in flight, then start it | No `processing` state exists. Kafka may redeliver the message. There may be one extra attempt with the same notification id, but no duplicate `notifications` row. This is a documented risk, not an approved guarantee | Expected from code. Lease and fencing (decision 7) are approved but not implemented |
+| X3 | Stop the app while an attempt is in flight, then start it | The notification stays `processing` until its lease (60 s) expires. The recovery sweep (every 30 s) releases it and the interrupted attempt is recorded as `interrupted`, counting toward the five attempts. A stale worker cannot overwrite the result (generation token). Kafka may redeliver the message, but there is no duplicate `notifications` row | Verified by `JdbcProcessingRecoveryTests` (#20). Not run live |
 | X4 | Confirm the notification states | Only `pending`, `retrying`, `completed` and `failed` are stored. Check the table constraint | Verified in `V1__create_notification_schema.sql` |
 | X5 | Count rows after the whole run | No duplicate rows in `notifications` for a single `event_id` and subscription | Expected |
 
@@ -153,9 +153,7 @@ Run in this order. Use new `event_id` values for every ingestion.
 
 ## 4. Known gaps
 
-- Reconciliation decision 3 (subscription cap, `409 SUBSCRIPTION_LIMIT_REACHED`) is not implemented. Case R4 documents the current behaviour.
-- Decision 7 (lease, fencing token) is approved but not implemented. Case X3 is a risk, not a passed check.
-- Decision D49 (`Retry-After` cap of 300 s) is not implemented. Case D5 is a gap.
+- Reconciliation decisions 3 (subscription cap) and 7 (lease and fencing token), and decision D49 (`Retry-After` cap), are implemented (#19, #20, #30). Cases R4, X3 and D5 describe the implemented behaviour and are covered by tests. None of them has been run against the live stack yet.
 - Seed replay (P5) cannot reach the demo receiver by design (decision D13 stores the URL as a snapshot). It is documented, not a demo path.
 - Not verified in this branch: the database credentials and port of `compose.yaml`; that `webhook.example.com` does not resolve in real DNS; the cause of the retry gaps (measured in the observed run, not explained by the configured delays); the audit log output format.
 - Expected results marked as such must be run and then updated to the observed values before this plan is used as evidence.

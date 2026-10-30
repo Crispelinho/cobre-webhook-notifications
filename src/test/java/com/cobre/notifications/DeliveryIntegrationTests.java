@@ -62,7 +62,8 @@ import com.github.tomakehurst.wiremock.matching.MatchResult;
  * {@code HttpsWebhookSenderTests}.
  */
 @SpringBootTest(properties = { "app.delivery.consumer.enabled=true", "app.outbox.relay.poll-interval=PT0.2S",
-		"app.delivery.retry.delays=PT0.2S,PT0.3S,PT0.4S,PT0.5S", "app.delivery.http.request-timeout=PT3S" })
+		"app.delivery.retry.delays=PT0.2S,PT0.3S,PT0.4S,PT0.5S", "app.delivery.http.request-timeout=PT3S",
+		"app.delivery.retry-after-cap=PT3S" })
 @AutoConfigureMockMvc
 @Import({ TestcontainersConfiguration.class, DeliveryIntegrationTests.TrustTestCertificate.class })
 class DeliveryIntegrationTests {
@@ -167,6 +168,31 @@ class DeliveryIntegrationTests {
 			.query(java.time.Instant.class)
 			.list();
 		assertThat(Duration.between(times.get(0), times.get(1))).isGreaterThanOrEqualTo(Duration.ofSeconds(2));
+	}
+
+	@Test
+	void aRetryAfterAboveTheCapIsScheduledAtTheCapAndNotAnHourLater() throws Exception {
+		receiver.stubFor(post("/over-cap").inScenario("over-cap")
+			.whenScenarioStateIs(com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED)
+			.willReturn(aResponse().withStatus(429).withHeader("Retry-After", "3600"))
+			.willSetStateTo("recovered"));
+		receiver.stubFor(post("/over-cap").inScenario("over-cap")
+			.whenScenarioStateIs("recovered")
+			.willReturn(aResponse().withStatus(200)));
+
+		String id = ingestFor("/over-cap");
+		// The cap is 3 s (see @SpringBootTest), so the retry must arrive within the await, not after an hour.
+		awaitStatus(id, "completed");
+
+		assertThat(attempts(id)).extracting(a -> a.get("http_status")).containsExactly(429, 200);
+		List<java.time.Instant> times = jdbc.sql("SELECT attempted_at FROM delivery_attempts "
+				+ "WHERE notification_id = :id ORDER BY attempt_number")
+			.param("id", id)
+			.query(java.time.Instant.class)
+			.list();
+		Duration gap = Duration.between(times.get(0), times.get(1));
+		assertThat(gap).isGreaterThanOrEqualTo(Duration.ofSeconds(3));
+		assertThat(gap).isLessThan(Duration.ofSeconds(30));
 	}
 
 	@Test
