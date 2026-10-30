@@ -108,7 +108,7 @@ class SubscriptionManagementAcceptanceTests {
 		@ParameterizedTest
 		@ValueSource(strings = { "http://hooks.example.org/cobre", "https://not-allowed.example.net/",
 				"https://loopback.example.org/", "https://private.example.org/", "https://metadata.example.org/latest",
-				"https://hooks.example.org:8443/cobre" })
+				"https://hooks.example.org:8443/cobre", "https://unresolved.example.org/cobre" })
 		void unsafeDestination(String url) throws Exception {
 			String clientId = "SUBTEST_UNSAFE";
 
