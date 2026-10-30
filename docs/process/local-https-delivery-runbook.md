@@ -462,14 +462,14 @@ Expected: `202`, with one notification for `SUB-CLIENT001`.
 
 **What to check in the database.** After a few seconds:
 
-- If the name does not resolve: `notifications` ends `failed` with `last_error` `dns_error` and `attempts` 5, `round` 1. `delivery_attempts` has five rows with `error_type` `dns_error` and `http_status` NULL.
+- If the name does not resolve: `notifications` ends `failed` with `last_error` `dns_error` and `attempts` 5, `round` 1. `delivery_attempts` has five rows with `error_type` `dns_error` and `http_status` NULL. Observed 2026-10-30 with `WEBHOOK_ALLOWED_HOSTS=webhook.example.com`: five attempts, `failed`, at +0 s, +10.6 s, +41.2 s, +102.2 s and +222.8 s.
 - If the name resolves to a private address: `notifications` ends `failed` with `last_error` `invalid_destination` and `attempts` 1. `delivery_attempts` has one row with `error_type` `invalid_destination`.
 
 Why: `HttpsWebhookSender.send` handles the two cases differently. A `DestinationResolutionException` (the name does not resolve) becomes `TransportError.DNS`, which is `dns_error`, and `DeliveryOutcome.classify` maps it to `RETRYABLE`, so the round uses its five attempts (decision D54, PR #32). A `RejectedDestinationException` (the name resolves to a non-public address) becomes `INVALID_DESTINATION`, which is `PERMANENT`, with one attempt. In both cases no request is sent.
 
 **What to check in the log.** The service logs at WARN `Destination of notification event <id> did not resolve: <reason>` for a DNS failure, or `Destination of notification event <id> rejected: <reason>` for a rejected host. The reason depends on DNS:
 
-- `host does not resolve`: the name has no address record.
+- `host does not resolve`: the name has no address record. Observed 2026-10-30 for `webhook.example.com`, at registration (`400`) and at delivery (`dns_error`).
 - `host resolves to a non-public address`: the name resolves to a private or reserved address. On the machine where this runbook was written, the local resolver answered `192.168.5.1` for `webhook.example.com`, and a public resolver (`8.8.8.8`) returned no address for it on 2026-10-29. Your result may differ. The first ends in `dns_error` (retried five times). The second ends in `invalid_destination` (one attempt).
 
 **What to check on the dashboard and in the alert rules.**
@@ -505,7 +505,7 @@ The policy checks in this order (`DestinationPolicy.check`), so the first failin
 | B2 | `https://example.org:8443/cobre` | 400 | `only port 443 is allowed` | Rule 2 runs before the allowlist, so the host does not matter. |
 | B3 | `https://example.org/cobre` | 400 | `host is not in the allowlist` | `example.org` is not in the default allowlist (`webhook.example.com`). |
 | B4 | `https://10.0.0.5/cobre` | 400 | `host is not in the allowlist` | Rule 4 runs before DNS. A private IP literal fails here, not on rule 5. |
-| B5 | `https://webhook.example.com/cobre` | 400 | `host resolves to a non-public address` or `host does not resolve` | The host is allowlisted by default, so the policy resolves it. The reason depends on DNS (see Scenario A). |
+| B5 | `https://webhook.example.com/cobre` | 400 | `host does not resolve` (observed 2026-10-30) or `host resolves to a non-public address` (observed 2026-10-29) | The host is allowlisted, so the policy resolves it. The reason depends on DNS on the day of the run (see Scenario A). |
 
 Example request (B3):
 
@@ -616,7 +616,7 @@ For `/fail`, the second run in [Verified run](#verified-run) measured the first 
 
 ### Known gaps for the demo
 
-- **DNS failures.** `dns_error` is implemented on `origin/develop` (PR #32, decision D54; D66 in [the decision log](../architecture/decision-log.md) names the error type). A name that does not resolve is retried up to five attempts per round, then ends `failed`. A name that resolves to a non-public address is not retried (`invalid_destination`). The real-DNS case was not exercised in the observed run: on the machine where the observed run took place, `webhook.example.com` resolved to a private address. Check the outcome of `dns_error` in the observed run before you rely on it.
+- **DNS failures.** `dns_error` is implemented on `origin/develop` (PR #32, decision D54; D66 in [the decision log](../architecture/decision-log.md) names the error type). A name that does not resolve is retried up to five attempts per round, then ends `failed`. A name that resolves to a non-public address is not retried (`invalid_destination`). `dns_error` was observed on 2026-10-30 for a name that does not resolve: five attempts, then `failed`. On 2026-10-29 the same host resolved to a private address, so the outcome depends on DNS on the day of the run.
 - **Test receiver.** It does not verify signatures (see Scenario C).
 - **Attempt timings.** The configured delays `PT10S,PT30S,PT1M,PT2M` do not match the gaps of the observed run (+33 s, +129 s, +428 s and +2 077 s between attempts). The cause is not verified. Check the profiles the service started with (Spring logs them at startup) before you rely on any timing.
 - **Grafana access.** The login is not in this repository.
@@ -664,6 +664,24 @@ Not verified, and needed to close this run:
 - `WEBHOOK_ALLOWED_HOSTS` is a development and demo control. It shows the policy working. It is not how production routes to client URLs: that would need per-client ownership verification, proposed in [destination-ownership-proposal.md](../architecture/destination-ownership-proposal.md).
 - A host that is not on the list is refused at registration with a generic `400`. The reason is only in the service log, so a caller cannot learn which hosts are listed.
 - `*` is not a wildcard. The list is matched exactly, so `*` matches nothing and every destination is refused. Permitting every host would turn the service into a relay for event content, and the runbook does not offer that option.
+
+## Isolated run, 2026-10-30
+
+A run against a stack of its own (PostgreSQL on port 15432, Kafka on 19092, the service on 8082), so no other process shared the consumer group or the database. The service ran with the `local` profile and `WEBHOOK_ALLOWED_HOSTS` set per phase. Each row is in the [demo test plan](../process/demo-verification-checklist.md).
+
+| Phase | Result |
+|---|---|
+| Smoke (S1, S2) | `401` without a token, `200` with `data` |
+| Scenario A (`webhook.example.com` does not resolve) | `dns_error`, five attempts, `failed`. Gaps of 10.6 s, 30.6 s, 61.0 s and 120.6 s |
+| Rejected destinations (B1 to B5) | `400` each. Reasons: `only https is allowed`, `only port 443 is allowed`, `host is not in the allowlist` (B3 and B4), `host does not resolve` (B5) |
+| Success with the tunnel host (`ok`) | `completed` on the first attempt, signature valid |
+| Failure with the tunnel host (`fail`) | Five attempts with `500`, `failed`. Gaps of 10.7 s, 31.1 s, 61.0 s and 122.0 s |
+| Isolation (C12) | `202` with an empty `notification_event_ids`. Nothing reaches `CLIENT001` |
+| Read and replay (R1 to R5) | Detail `200`; `409` on a completed replay; a failed notification replayed gives round 2; the filter returns only `failed` |
+| Replay after restoring the host (R4) | `invalid_destination` with the host removed, then round 2 `completed` after the host is restored |
+| Cleanup | Test subscriptions deactivated; nothing left `pending` or `retrying` |
+
+Not checked: the dashboard **Notification delivery** and the four alert rules in Grafana.
 
 ## What this runbook does not cover
 

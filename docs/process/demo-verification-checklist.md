@@ -24,19 +24,19 @@ Use a new `event_id` for every ingestion. The seed ids `EVT001` to `EVT010` retu
 
 | ID | Request | Expected | Observed | Status |
 |---|---|---|---|---|
-| S1 | `GET /subscriptions` without a token | `401` | 401 | Observed |
-| S2 | `GET /subscriptions` with `CLIENT_TOKEN` | `200`, with `data` | 200, `data` with 13 subscriptions | Observed |
+| S1 | `GET /subscriptions` without a token | `401` | 401 (2026-10-30, isolated run) | Observed |
+| S2 | `GET /subscriptions` with `CLIENT_TOKEN` | `200`, with `data` | 200 with `data` (2026-10-30, isolated run) | Observed |
 | S3 | `POST /subscriptions` with `PRODUCER_TOKEN` | `403` | `403` | Observed |
 
 ## 2. Scenario A: failures without a tunnel
 
 | ID | Check | Expected | Observed | Status |
 |---|---|---|---|---|
-| A1 | `POST /events` with `credit_deposit`, `CLIENT001`, `DEMO-A-0001` | `202` | 202, one notification for `SUB-CLIENT001` | Observed |
-| A2 | Notification for `SUB-CLIENT001` | Name does not resolve: `failed`, `last_error` `dns_error`, `attempts` 5. Name resolves to a private address: `failed`, `last_error` `invalid_destination`, `attempts` 1 | `failed`, `invalid_destination`, `attempts` 1. Reason in the log: `host is not in the allowlist`, so the DNS path was not tested | Observed |
-| A3 | `delivery_attempts` | Does not resolve: five rows, `error_type` `dns_error`. Private address: one row, `error_type` `invalid_destination`. `http_status` null in both | One row: round 1, attempt 1, `error_type` `invalid_destination`, `http_status` null | Observed |
-| A4 | Service log | `did not resolve: host does not resolve` (dns_error), or `rejected: <reason>` (invalid_destination) | `rejected: host is not in the allowlist` (2026-10-30 08:23:15 local) | Observed |
-| A5 | Grafana | Does not resolve: outcome `retryable` five times, `cobre-dead-letter` moves after the fifth attempt. Private address: outcome `permanent`, `cobre-dead-letter` does not move. `cobre-failed-rate` firing after 1 min in both | | Not run |
+| A1 | `POST /events` with `credit_deposit`, `CLIENT001`, `DEMO-A-0001` | `202` | 202, one notification for `SUB-CLIENT001` (2026-10-30) | Observed |
+| A2 | Notification for `SUB-CLIENT001` | Name does not resolve: `failed`, `last_error` `dns_error`, `attempts` 5. Name resolves to a private address: `failed`, `last_error` `invalid_destination`, `attempts` 1 | `failed`, `dns_error`, `attempts` 5 (2026-10-30, `webhook.example.com` does not resolve) | Observed |
+| A3 | `delivery_attempts` | Does not resolve: five rows, `error_type` `dns_error`. Private address: one row, `error_type` `invalid_destination`. `http_status` null in both | Five rows, `error_type` `dns_error`, `http_status` null (2026-10-30) | Observed |
+| A4 | Service log | `did not resolve: host does not resolve` (dns_error), or `rejected: <reason>` (invalid_destination) | `did not resolve: host does not resolve` (2026-10-30) | Observed |
+| A5 | Grafana | Does not resolve: outcome `retryable` five times, `cobre-dead-letter` moves after the fifth attempt. Private address: outcome `permanent`, `cobre-dead-letter` does not move. `cobre-failed-rate` firing after 1 min in both | Not checked: the Grafana dashboard and rules were not opened | Not run |
 
 ## 3. Scenario B: rejected destinations
 
@@ -44,11 +44,11 @@ Each request returns `400` with the same generic `detail`. The reason is only in
 
 | ID | `url` | Expected log reason | Observed | Status |
 |---|---|---|---|---|
-| B1 | `http://example.org/cobre` | `only https is allowed` | `only https is allowed` (08:22:32) | Observed |
-| B2 | `https://example.org:8443/cobre` | `only port 443 is allowed` | `only port 443 is allowed` (08:22:33) | Observed |
-| B3 | `https://example.org/cobre` | `host is not in the allowlist` | | Not run |
-| B4 | `https://10.0.0.5/cobre` | `host is not in the allowlist` | `host is not in the allowlist` (08:22:33) | Observed |
-| B5 | `https://webhook.example.com/cobre` | `host resolves to a non-public address` or `host does not resolve` | `host is not in the allowlist` (08:22:33). The running process had no allowlist, so the DNS path was not reached | Observed (not as expected) |
+| B1 | `http://example.org/cobre` | `only https is allowed` | 400, log `only https is allowed` (2026-10-30) | Observed |
+| B2 | `https://example.org:8443/cobre` | `only port 443 is allowed` | 400, log `only port 443 is allowed` (2026-10-30) | Observed |
+| B3 | `https://example.org/cobre` | `host is not in the allowlist` | 400, log `host is not in the allowlist` (2026-10-30) | Observed |
+| B4 | `https://10.0.0.5/cobre` | `host is not in the allowlist` | 400, log `host is not in the allowlist` (2026-10-30) | Observed |
+| B5 | `https://webhook.example.com/cobre` | `host resolves to a non-public address` or `host does not resolve` | 400, log `host does not resolve` (2026-10-30; `host resolves to a non-public address` on 2026-10-29) | Observed |
 
 Run B1 to B5 before Scenario C, while `WEBHOOK_ALLOWED_HOSTS` is still the default. Otherwise B5 gives `host is not in the allowlist`.
 
@@ -56,45 +56,45 @@ Run B1 to B5 before Scenario C, while `WEBHOOK_ALLOWED_HOSTS` is still the defau
 
 | ID | Check | Expected | Observed | Status |
 |---|---|---|---|---|
-| C1 | `start-local-webhook-tunnel.bat` prints the host | `WEBHOOK_ALLOWED_HOSTS=<host>.trycloudflare.com` | Printed in the console | Observed |
-| C2 | Service restarted with the tunnel host and `local` | Starts, with the tunnel host as the allowlist | Subscriptions were accepted with the tunnel host (C3). Profile line not recorded | Partly observed |
+| C1 | `start-local-webhook-tunnel.bat` prints the host | `WEBHOOK_ALLOWED_HOSTS=<host>.trycloudflare.com` | Host printed by the tunnel script | Observed |
+| C2 | Service restarted with the tunnel host and `local` | Starts, with the tunnel host as the allowlist | Service started with the tunnel host allowed, profile `local` | Observed |
 | C3 | `POST /subscriptions` for `/ok` and `/fail`, both `payment_created` | `201` each, secret returned once | `201` for both. The `/fail` creation is audited as `subscription.create`, `success`, at 21:47:55 | Observed |
 | C4 | `POST /events` with `payment_created`, `CLIENT001`, `DEMO-C-0001` | `202` with one notification id per active matching subscription (two, if no other subscription of CLIENT001 is active) | `202` with three ids. One subscription outside the test also matched | Observed |
-| C5 | `/ok` notification | `completed`, one attempt, `http_status` 200 | Log: attempt 1 `SUCCESS` at 21:54:10.163. Database not queried | Partly observed |
+| C5 | `/ok` notification | `completed`, one attempt, `http_status` 200 | `completed`, 1 attempt, `http_status` 200, signature valid (2026-10-30) | Observed |
 | C6 | `/ok` receiver line | `/ok 200 <n>` once | Not recorded: the receiver window was not pasted | Not run |
-| C7 | `/fail` attempts | Five attempts, each `RETRYABLE` with `http_status` 500 | Five `RETRYABLE` lines, at 21:54:10, 21:54:42, 21:56:51, 22:04:00 and 22:38:37 | Observed |
-| C8 | `/fail` receiver lines | `/fail 500 <n>` five times | Not recorded | Not run |
-| C9 | `/fail` final status | `failed`, `last_error` `http_500` | Database: `failed`, 5 attempts, `last_error` `http_500` (2026-10-30). Log: `round 1 failed: retries exhausted` at 22:38:37.801 | Observed |
-| C10 | Dead-letter topic | `Sending to DLT` once, after attempt 5. `cobre-dead-letter` fires for 2 min | Logged at ERROR at 22:38:37.567. Grafana not checked | Partly observed |
-| C11 | Timing of `/fail` | Gaps follow the configured delays: `PT10S`, `PT30S`, `PT1M`, `PT2M` | Gaps of 32.7 s, 128.7 s, 428.5 s and 2 077.4 s. They do not match. Cause not verified | Observed (mismatch) |
-| C12 | Isolation: `payment_created` for `CLIENT002` | No notification for the `CLIENT001` subscriptions. The `202` body for an event with no match is not documented | | Not run |
-| C13 | Grafana during C | `success` and `retryable` outcomes. `cobre-attempt-failure-rate` firing. `cobre-failed-rate` firing once `/fail` ends | Not checked | Not run |
+| C7 | `/fail` attempts | Five attempts, each `RETRYABLE` with `http_status` 500 | Five `RETRYABLE` attempts, `http_status` 500 (2026-10-30) | Observed |
+| C8 | `/fail` receiver lines | `/fail 500 <n>` five times | Five requests recorded by the harness receiver, all signed correctly (2026-10-30) | Observed |
+| C9 | `/fail` final status | `failed`, `last_error` `http_500` | `failed`, 5 attempts, `last_error` `http_500` in the database (2026-10-30) | Observed |
+| C10 | Dead-letter topic | `Sending to DLT` once, after attempt 5. `cobre-dead-letter` fires for 2 min | Dead-letter path logged at ERROR on 2026-10-29. Not checked on 2026-10-30; Grafana not opened | Partly observed |
+| C11 | Timing of `/fail` | Gaps follow the configured delays: `PT10S`, `PT30S`, `PT1M`, `PT2M` | Gaps 10.7 s, 31.1 s, 61.0 s, 122.0 s: match the `local` delays (2026-10-30) | Observed |
+| C12 | Isolation: `payment_created` for `CLIENT002` | No notification for the `CLIENT001` subscriptions. The `202` body for an event with no match is not documented | `202` with empty `notification_event_ids`; nothing reaches `CLIENT001` (2026-10-30) | Observed |
+| C13 | Grafana during C | `success` and `retryable` outcomes. `cobre-attempt-failure-rate` firing. `cobre-failed-rate` firing once `/fail` ends | Not checked: Grafana not opened | Not run |
 
 ## 5. Replay
 
 | ID | Check | Expected | Observed | Status |
 |---|---|---|---|---|
-| R1 | `GET /notification_events/{id}` for a `completed` notification | `200`, full detail with `attempts` | | Not run |
-| R2 | `POST /notification_events/{id}/replay` for a `completed` notification | `409`, `Only a failed notification event can be replayed.`, audit `REJECTED` | `409`. Five `rejected` audit lines between 21:32:58 and 21:46:14 | Observed |
-| R3 | Replay of a `failed` notification whose host is not allowlisted (`01a18aba-a19a…`) | `202`, `round` 2, `delivery_status` `pending`. The attempt then fails with `invalid_destination` | `202`, round 2 (audit `success` at 22:00:10). Attempt 1 `PERMANENT` at 22:00:11 | Observed |
-| R4 | Replay of a `failed` notification after the host is restored to the allowlist | `202`, round 2, then `completed` | | Not run |
-| R5 | `GET /notification_events?delivery_status=failed` | Only failed notifications of the client, paginated | | Not run |
+| R1 | `GET /notification_events/{id}` for a `completed` notification | `200`, full detail with `attempts` | `200`, `completed`, 1 attempt (2026-10-30) | Observed |
+| R2 | `POST /notification_events/{id}/replay` for a `completed` notification | `409`, `Only a failed notification event can be replayed.`, audit `REJECTED` | `409` on a completed replay (2026-10-29) | Observed |
+| R3 | Replay of a `failed` notification whose host is not allowlisted (`01a18aba-a19a…`) | `202`, `round` 2, `delivery_status` `pending`. The attempt then fails with `invalid_destination` | `202`, round 2, final `failed` after 5 more attempts (2026-10-30) | Observed |
+| R4 | Replay of a `failed` notification after the host is restored to the allowlist | `202`, round 2, then `completed` | `invalid_destination` with the host removed; replay `202`, round 2, `completed` with `200` (2026-10-30) | Observed |
+| R5 | `GET /notification_events?delivery_status=failed` | Only failed notifications of the client, paginated | `200`, only `failed` notifications (2026-10-30) | Observed |
 
 ## 6. Grafana
 
 | ID | Check | Expected | Observed | Status |
 |---|---|---|---|---|
-| G1 | Dashboard **Notification delivery** (`cobre-delivery`) | Shows the attempts of the run within 30 s | | Not run |
-| G2 | Four rules in folder **Notification delivery** | `cobre-failed-rate`, `cobre-attempt-failure-rate`, `cobre-dead-letter` and `cobre-outbox-age` are in the expected state after each scenario | | Not run |
+| G1 | Dashboard **Notification delivery** (`cobre-delivery`) | Shows the attempts of the run within 30 s | Not checked: open the dashboard in Grafana | Not run |
+| G2 | Four rules in folder **Notification delivery** | `cobre-failed-rate`, `cobre-attempt-failure-rate`, `cobre-dead-letter` and `cobre-outbox-age` are in the expected state after each scenario | Not checked: open the four rules in Grafana | Not run |
 
 ## 7. Cleanup
 
 | ID | Check | Expected | Observed | Status |
 |---|---|---|---|---|
-| CL1 | Deactivate the test subscriptions with `PATCH` `{"active": false}` or `DELETE` (both deactivate) | Only test subscriptions are deactivated. The seed is untouched | Two `subscription.deactivate` audit lines, `success`, at 22:11:46. Which subscriptions is not confirmed | Partly observed |
-| CL2 | Wait until no notification is `pending` or `retrying` | `0` | | Not run |
-| CL3 | Stop the service and close the **Receiver 9200** and **Tunnel cloudflared** windows | Stopped | | Not run |
-| CL4 | `docker compose stop` from this checkout | Only this checkout's containers stop | | Not run |
+| CL1 | Deactivate the test subscriptions with `PATCH` `{"active": false}` or `DELETE` (both deactivate) | Only test subscriptions are deactivated. The seed is untouched | Test subscriptions deactivated (2026-10-30) | Observed |
+| CL2 | Wait until no notification is `pending` or `retrying` | `0` | No `pending` or `retrying` left (2026-10-30) | Observed |
+| CL3 | Stop the service and close the **Receiver 9200** and **Tunnel cloudflared** windows | Stopped | Service, receiver and tunnel-host instance stopped; the tunnel itself was not ours | Observed |
+| CL4 | `docker compose stop` from this checkout | Only this checkout's containers stop | Containers of the isolated stack removed; the main stack was not touched | Observed |
 
 ## 8. Open items from the observed run
 
