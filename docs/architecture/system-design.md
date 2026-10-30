@@ -14,11 +14,12 @@ flowchart LR
     svc["Notification service"]
 
     producer -- "POST /events (service JWT)" --> svc
-    client -- "Self-service API (client JWT)" --> svc
+    client -- "Subscriptions, notification queries and replays (client JWT)" --> svc
     svc -- "HTTPS webhook, HMAC-signed" --> receiver
     monitoring -- "Dashboards and alerts" --> svc
     idp -. "Issues JWTs" .-> producer
     idp -. "Issues JWTs" .-> client
+    svc -. "Fetches JWKS to verify JWTs" .-> idp
 ```
 
 ## C4: containers
@@ -34,13 +35,16 @@ flowchart LR
     lgtm["Grafana LGTM<br/>metrics, logs, traces"]
     receiver["Client webhook receiver"]
 
-    api --> pg
-    worker --> pg
+    api -- "events, subscriptions, notification queries" --> pg
+    worker -- "outbox reads, attempts and state writes" --> pg
     worker --> kafka
     kafka --> worker
     worker -- HTTPS --> receiver
-    app -- OTLP --> lgtm
+    api -- OTLP --> lgtm
+    worker -- OTLP --> lgtm
 ```
+
+Both roles are the same deployable (D31): the diagram shows the roles, not two services.
 
 | Container | Responsibility |
 |---|---|
@@ -69,6 +73,46 @@ shared/          security (JWT, scopes, client identity) · crypto (HMAC, AES-GC
 ```
 
 The domain decides whether an error is retried (D21): `DeliveryOutcome` is `SUCCESS`, `RETRYABLE` or `PERMANENT`. The Kafka adapter only maps `RETRYABLE` to a retry topic. If Kafka is replaced (fallback plan), retry rules do not change.
+
+## C4: components (notifications capability)
+
+```mermaid
+flowchart LR
+    subgraph inbound["Inbound adapters"]
+        rest["REST: notification_events, replay"]
+        kin["Kafka consumer: dispatch and dead letter"]
+        relay["Scheduler: outbox relay, next attempt"]
+    end
+    subgraph app["Application"]
+        query["ListNotificationEvents, GetNotificationEvent"]
+        replay["ReplayNotificationEvent"]
+        dispatch["DispatchNotificationEvent, MarkExhausted"]
+    end
+    subgraph domain["Domain"]
+        nev["NotificationEvent, DeliveryAttempt"]
+        outcome["DeliveryOutcome: SUCCESS, RETRYABLE, PERMANENT"]
+    end
+    subgraph outbound["Outbound ports and adapters"]
+        repo["NotificationRepository: JDBC"]
+        pub["DispatchPublisher: Kafka producer"]
+        http["WebhookSender: HTTPS client"]
+        dest["DestinationResolver: DestinationPolicy"]
+    end
+    rest --> query
+    rest --> replay
+    kin --> dispatch
+    relay --> dispatch
+    dispatch --> nev
+    dispatch --> outcome
+    query --> repo
+    replay --> repo
+    dispatch --> repo
+    dispatch --> pub
+    dispatch --> http
+    http --> dest
+```
+
+The domain never imports a framework or an adapter (`HexagonalArchitectureTests`). Only the adapters map `RETRYABLE` to a retry topic.
 
 ## Data model
 
@@ -148,6 +192,34 @@ The last retryable attempt of a round already marked the notification event `fai
 ### F6. Query
 
 `GET /notification_events?created_from&created_to&delivery_status&page&size` with `client_id` taken only from the token and a page size of at most 100. `GET /notification_events/{id}` returns the detail with its attempts, or `404` if it belongs to another client.
+
+## C4: dynamic view, delivery with retry and dead letter
+
+```mermaid
+sequenceDiagram
+    participant P as Producer
+    participant A as API
+    participant DB as PostgreSQL
+    participant R as Outbox relay
+    participant K as Kafka
+    participant W as Worker
+    participant C as Client receiver
+
+    P->>A: POST /events
+    A->>DB: event, notifications and outbox row (one transaction)
+    A-->>P: 202
+    R->>DB: lock unpublished outbox rows (SKIP LOCKED)
+    R->>K: publish to notification.dispatch
+    K->>W: dispatch message
+    W->>C: signed POST (attempt 1)
+    C-->>W: 5xx or timeout (RETRYABLE)
+    W->>K: retry topic with backoff (attempts 2 to 4)
+    W->>C: attempt 5
+    C-->>W: 5xx (RETRYABLE, last attempt)
+    W->>DB: notification failed in the same write (D70)
+    W->>K: message to the dead-letter topic
+    Note over W,K: a 2xx at any attempt completes the event; a PERMANENT outcome fails it at once
+```
 
 ## Capacity
 
