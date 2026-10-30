@@ -24,17 +24,17 @@ Use a new `event_id` for every ingestion. The seed ids `EVT001` to `EVT010` retu
 
 | ID | Request | Expected | Observed | Status |
 |---|---|---|---|---|
-| S1 | `GET /subscriptions` without a token | `401` | | Not run |
-| S2 | `GET /subscriptions` with `CLIENT_TOKEN` | `200`, with `data` | | Not run |
+| S1 | `GET /subscriptions` without a token | `401` | 401 | Observed |
+| S2 | `GET /subscriptions` with `CLIENT_TOKEN` | `200`, with `data` | 200, `data` with 13 subscriptions | Observed |
 | S3 | `POST /subscriptions` with `PRODUCER_TOKEN` | `403` | `403` | Observed |
 
 ## 2. Scenario A: failures without a tunnel
 
 | ID | Check | Expected | Observed | Status |
 |---|---|---|---|---|
-| A1 | `POST /events` with `credit_deposit`, `CLIENT001`, `DEMO-A-0001` | `202` | | Not run |
-| A2 | Notification for `SUB-CLIENT001` | Name does not resolve: `failed`, `last_error` `dns_error`, `attempts` 5. Name resolves to a private address: `failed`, `last_error` `invalid_destination`, `attempts` 1 | | Not run |
-| A3 | `delivery_attempts` | Does not resolve: five rows, `error_type` `dns_error`. Private address: one row, `error_type` `invalid_destination`. `http_status` null in both | | Not run |
+| A1 | `POST /events` with `credit_deposit`, `CLIENT001`, `DEMO-A-0001` | `202` | 202, one notification for `SUB-CLIENT001` | Observed |
+| A2 | Notification for `SUB-CLIENT001` | Name does not resolve: `failed`, `last_error` `dns_error`, `attempts` 5. Name resolves to a private address: `failed`, `last_error` `invalid_destination`, `attempts` 1 | `failed`, `invalid_destination`, `attempts` 1 (not `dns_error`: the name resolves to a non-public address here) | Observed |
+| A3 | `delivery_attempts` | Does not resolve: five rows, `error_type` `dns_error`. Private address: one row, `error_type` `invalid_destination`. `http_status` null in both | One row: round 1, attempt 1, `error_type` `invalid_destination`, `http_status` null | Observed |
 | A4 | Service log | `did not resolve: host does not resolve` (dns_error), or `rejected: host resolves to a non-public address` (invalid_destination) | | Not run |
 | A5 | Grafana | Does not resolve: outcome `retryable` five times, `cobre-dead-letter` moves after the fifth attempt. Private address: outcome `permanent`, `cobre-dead-letter` does not move. `cobre-failed-rate` firing after 1 min in both | | Not run |
 
@@ -44,11 +44,11 @@ Each request returns `400` with the same generic `detail`. The reason is only in
 
 | ID | `url` | Expected log reason | Observed | Status |
 |---|---|---|---|---|
-| B1 | `http://example.org/cobre` | `only https is allowed` | | Not run |
-| B2 | `https://example.org:8443/cobre` | `only port 443 is allowed` | | Not run |
+| B1 | `http://example.org/cobre` | `only https is allowed` | 400, generic `detail`; reason only in the service log (not read) | Partly observed |
+| B2 | `https://example.org:8443/cobre` | `only port 443 is allowed` | 400, generic `detail`; reason only in the service log (not read) | Partly observed |
 | B3 | `https://example.org/cobre` | `host is not in the allowlist` | | Not run |
-| B4 | `https://10.0.0.5/cobre` | `host is not in the allowlist` | | Not run |
-| B5 | `https://webhook.example.com/cobre` | `host resolves to a non-public address` or `host does not resolve`, depending on DNS | | Not run |
+| B4 | `https://10.0.0.5/cobre` | `host is not in the allowlist` | 400, generic `detail`; reason only in the service log (not read) | Partly observed |
+| B5 | `https://webhook.example.com/cobre` | `host resolves to a non-public address` or `host does not resolve`, depending on DNS | 400, generic `detail`; reason only in the service log (not read) | Partly observed |
 
 Run B1 to B5 before Scenario C, while `WEBHOOK_ALLOWED_HOSTS` is still the default. Otherwise B5 gives `host is not in the allowlist`.
 
