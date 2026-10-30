@@ -306,6 +306,46 @@ class DeliveryServiceTests {
 	}
 
 	@Test
+	void dnsFailuresUseTheFiveAttemptsOfTheRoundThenFailTheEvent() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.failure(NOW, TransportError.DNS, 5_000);
+
+		for (int attempt = 1; attempt <= 5; attempt++) {
+			assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+			assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+			assertThat(store.attempts).hasSize(attempt);
+		}
+		assertThat(store.attempts).allSatisfy(attempt -> {
+			assertThat(attempt.errorType()).isEqualTo("dns_error");
+			assertThat(attempt.httpStatus()).isNull();
+		});
+
+		// The sixth message sends nothing: the five DNS attempts of the round are used up.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+
+		assertThat(sent).hasSize(5);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.lastError()).isEqualTo("dns_error");
+	}
+
+	@Test
+	void aFirstDnsFailureThenACompletedAttemptCompletesTheEvent() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.failure(NOW, TransportError.DNS, 5_000);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+
+		nextResult = AttemptResult.response(NOW, 200, 20);
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(store.attempts).hasSize(2);
+		assertThat(store.attempts.get(0).errorType()).isEqualTo("dns_error");
+		assertThat(store.attempts.get(1).httpStatus()).isEqualTo(200);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+	}
+
+	@Test
 	void aCompletedEventIsIgnoredWithoutSendingOrRecording() {
 		store.current = delivery(DeliveryStatus.COMPLETED, 1, 1);
 
