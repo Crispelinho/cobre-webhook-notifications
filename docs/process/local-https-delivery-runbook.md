@@ -167,7 +167,7 @@ Compare with a constant-time function. Reject the request if `t` is more than a 
 
 | Symptom | Likely cause | Check |
 |---|---|---|
-| `POST /subscriptions` returns 400 with `url is not an allowed destination` | A rule of the destination policy failed. The API message is deliberately generic | The reason is only in the application log (`Subscription destination rejected: <reason>`). The reasons are: `only https is allowed`, `only port 443 is allowed`, `host is not in the allowlist`, `host does not resolve`, `host resolves to a non-public address`. |
+| `POST /subscriptions` returns 400 with `url is not an allowed destination` | A rule of the destination policy failed. The API message is deliberately generic | The reason is only in the application log (`Subscription destination rejected: <reason>`). The reasons are: `only https is allowed`, `only port 443 is allowed`, `host is not in the allowlist`, `host does not resolve`, `name resolution timed out`, `name resolution failed`, `host resolves to a non-public address`. |
 | Delivery ends in `INVALID_DESTINATION` (one attempt, no retries) | The host was valid when the subscription was created but not when the webhook was sent, because `WEBHOOK_ALLOWED_HOSTS` no longer contains it | Put the host back in `WEBHOOK_ALLOWED_HOSTS`, restart, and replay the notification. The replay keeps the URL stored with the notification, so the subscription does not change. |
 | The tunnel host changed and the old subscription URL is dead | A subscription's URL cannot be changed: `PATCH` accepts only `active` and `event_types` | Create a new subscription with the new host. Deactivate or delete the old one. |
 | Seed subscriptions fail with `dns_error` (five attempts, then `failed`) if the name does not resolve, or `invalid_destination` (one attempt) if it resolves to a non-public address | `webhook.example.com` does not resolve, or resolves to a private address | Expected. The seed is for the data model, not for live delivery. |
@@ -450,6 +450,8 @@ Why: `HttpsWebhookSender.send` handles the two cases differently. A `Destination
 **What to check in the log.** The service logs at WARN `Destination of notification event <id> did not resolve: <reason>` for a DNS failure, or `Destination of notification event <id> rejected: <reason>` for a rejected host. The reason depends on DNS:
 
 - `host does not resolve`: the name has no address record.
+- `name resolution timed out`: the lookup did not finish within the resolve timeout (5 seconds by default). The attempt is recorded as `dns_error`, like a name that does not resolve, so the round retries it.
+- `name resolution failed`: the resolver threw an unexpected error. Nothing was sent. The attempt is recorded as `dns_error` too, so it is retried. The cause is not in the log, only this generic reason.
 - `host resolves to a non-public address`: the name resolves to a private or reserved address. On the machine where this runbook was written, the local resolver answered `192.168.5.1` for `webhook.example.com`, and a public resolver (`8.8.8.8`) returned no address for it on 2026-10-29. Your result may differ. The first ends in `dns_error` (retried five times). The second ends in `invalid_destination` (one attempt).
 
 **What to check on the dashboard and in the alert rules.**

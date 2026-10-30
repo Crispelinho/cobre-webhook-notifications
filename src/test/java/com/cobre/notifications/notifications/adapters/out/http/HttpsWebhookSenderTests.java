@@ -30,6 +30,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
@@ -272,6 +273,25 @@ class HttpsWebhookSenderTests {
 			assertThat(result.error()).as("attempt %d", attempt).isEqualTo(TransportError.DNS);
 			assertThat(result.outcome()).as("attempt %d", attempt).isEqualTo(DeliveryOutcome.RETRYABLE);
 		}
+		assertThat(receiver.getAllServeEvents()).isEmpty();
+	}
+
+	@Test
+	void aResolverThatHangsIsADnsAttemptWithNoStatusAndNothingIsSent() {
+		// The resolve timeout (not the request timeout) ends the lookup, so the attempt is a DNS failure (D54).
+		DestinationPolicy hanging = new DestinationPolicy(List.of("hooks.example.org"), host -> {
+			LockSupport.parkNanos(Duration.ofSeconds(30).toNanos());
+			return List.of(InetAddress.getByName(DNS.get(host)));
+		}, Duration.ofMillis(200));
+		HttpsWebhookSender stuck = new HttpsWebhookSender(trusting, json, hanging, cipher, new WebhookSigner(),
+				Duration.ofSeconds(5), Clock.fixed(NOW, ZoneOffset.UTC));
+
+		AttemptResult result = stuck.send(delivery(url("/hook")));
+
+		assertThat(result.error()).isEqualTo(TransportError.DNS);
+		assertThat(result.errorType()).isEqualTo("dns_error");
+		assertThat(result.httpStatus()).isNull();
+		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.RETRYABLE);
 		assertThat(receiver.getAllServeEvents()).isEmpty();
 	}
 

@@ -197,6 +197,18 @@ class DestinationPolicyTests {
 	}
 
 	@Test
+	void anUnexpectedResolverFailureIsAResolutionFailureNotAnSsrfRejection() {
+		HostResolver broken = host -> {
+			throw new IllegalStateException("resolver broke");
+		};
+		DestinationPolicy policy = new DestinationPolicy(List.of("broken.example.org"), broken);
+
+		assertThatExceptionOfType(DestinationResolutionException.class)
+			.isThrownBy(() -> policy.check("https://broken.example.org/"))
+			.withMessage("name resolution failed");
+	}
+
+	@Test
 	void aLookupWithinTheResolveTimeoutIsUnchanged() throws UnknownHostException {
 		DestinationPolicy quick = new DestinationPolicy(List.of("hooks.example.org"), resolver, Duration.ofMillis(200));
 
