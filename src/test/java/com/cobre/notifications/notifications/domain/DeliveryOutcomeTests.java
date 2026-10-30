@@ -40,7 +40,8 @@ class DeliveryOutcomeTests {
 	}
 
 	@ParameterizedTest
-	@CsvSource({ "TIMEOUT,RETRYABLE", "CONNECTION,RETRYABLE", "TLS,PERMANENT", "INVALID_DESTINATION,PERMANENT" })
+	@CsvSource({ "TIMEOUT,RETRYABLE", "CONNECTION,RETRYABLE", "DNS,RETRYABLE", "TLS,PERMANENT",
+			"INVALID_DESTINATION,PERMANENT" })
 	void transportErrorsAreClassified(TransportError error, DeliveryOutcome expected) {
 		assertThat(DeliveryOutcome.classify(error)).isEqualTo(expected);
 	}

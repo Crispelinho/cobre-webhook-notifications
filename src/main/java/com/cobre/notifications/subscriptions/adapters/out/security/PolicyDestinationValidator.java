@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.cobre.notifications.shared.security.DestinationPolicy;
+import com.cobre.notifications.shared.security.DestinationResolutionException;
 import com.cobre.notifications.shared.security.RejectedDestinationException;
 import com.cobre.notifications.subscriptions.application.port.out.DestinationValidator;
 import com.cobre.notifications.subscriptions.domain.InvalidSubscriptionException;
@@ -30,7 +31,7 @@ class PolicyDestinationValidator implements DestinationValidator {
 		try {
 			policy.check(url.value());
 		}
-		catch (RejectedDestinationException ex) {
+		catch (RejectedDestinationException | DestinationResolutionException ex) {
 			// The reason is fixed text; the URL is not logged because its path or query may carry tokens.
 			log.info("Subscription destination rejected: {}", ex.getMessage());
 			throw new InvalidSubscriptionException(

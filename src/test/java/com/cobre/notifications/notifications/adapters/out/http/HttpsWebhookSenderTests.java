@@ -100,7 +100,7 @@ class HttpsWebhookSenderTests {
 
 	private final DestinationPolicy policy = new DestinationPolicy(
 			List.of("hooks.example.org", "loopback.example.org", "private.example.org", "metadata.example.org",
-					"mismatch.example.org"),
+					"mismatch.example.org", "dns-down.example.org"),
 			host -> {
 				String address = DNS.get(host);
 				if (address == null) {
@@ -222,6 +222,17 @@ class HttpsWebhookSenderTests {
 			assertThat(result.errorType()).isEqualTo("invalid_destination");
 			assertThat(result.outcome()).isEqualTo(DeliveryOutcome.PERMANENT);
 		}
+		assertThat(receiver.getAllServeEvents()).isEmpty();
+	}
+
+	@Test
+	void aHostThatDoesNotResolveIsARetryableDnsAttemptAndNothingIsSent() {
+		// "dns-down.example.org" is allowlisted but missing from the fixed DNS map, so the lookup fails like NXDOMAIN.
+		AttemptResult result = sender(trusting, Duration.ofSeconds(5)).send(delivery("https://dns-down.example.org/hook"));
+
+		assertThat(result.error()).isEqualTo(TransportError.DNS);
+		assertThat(result.errorType()).isEqualTo("dns_error");
+		assertThat(result.outcome()).isEqualTo(DeliveryOutcome.RETRYABLE);
 		assertThat(receiver.getAllServeEvents()).isEmpty();
 	}
 

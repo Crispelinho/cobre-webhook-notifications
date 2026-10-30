@@ -7,6 +7,8 @@ package com.cobre.notifications.notifications.domain;
 public enum TransportError {
 
 	TIMEOUT("timeout"), CONNECTION("connection_error"), TLS("tls_error"), INVALID_DESTINATION("invalid_destination"),
+	/** The host name did not resolve at send time (NXDOMAIN, SERVFAIL or timeout). The cause may be transient. */
+	DNS("dns_error"),
 	/** The subscription secret could not be decrypted, so the request cannot be signed and is never sent. */
 	SIGNING_ERROR("signing_error"),
 	/** The subscription has no secret: an unsigned delivery is never sent. */
