@@ -330,6 +330,26 @@ class JdbcScheduledAttemptAdapterTests {
 			.isEqualTo(rows);
 	}
 
+	@Test
+	void aScheduledRetryWaitsForItsInstantAcrossARestartAndIsEnqueuedOnceItIsDue() {
+		insertNotification("N1", "pending", 1, null);
+		DeliveryService service = new DeliveryService(store,
+				delivery -> AttemptResult.response(T0, 429, 5, Duration.ofSeconds(60)), Clock.fixed(T0, ZoneOffset.UTC),
+				5, DeliveryMetrics.NONE, Duration.ofSeconds(60), Duration.ofSeconds(300));
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+		Instant scheduledTime = store.find("N1").orElseThrow().nextAttemptAt();
+
+		// A restart drops every in-memory object: a new scheduler reads the time the database kept, and nothing else
+		// holds it.
+		JdbcScheduledAttemptAdapter restarted = new JdbcScheduledAttemptAdapter(jdbc);
+		assertThat(restarted.enqueueDue(100)).isZero();
+		assertThat(jdbc.sql("SELECT count(*) FROM outbox").query(Long.class).single()).isZero();
+		assertThat(store.find("N1").orElseThrow().nextAttemptAt()).isEqualTo(scheduledTime);
+
+		jdbc.sql("UPDATE notifications SET next_attempt_at = now() - interval '1 second' WHERE id = 'N1'").update();
+		assertThat(restarted.enqueueDue(100)).isEqualTo(1);
+	}
+
 	private Lease claim(Delivery delivery) {
 		return store.claim(delivery, "worker-1", T0, Duration.ofSeconds(60)).orElseThrow();
 	}
