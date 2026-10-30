@@ -179,6 +179,18 @@ class DestinationPolicyTests {
 	}
 
 	@Test
+	void aResolverThatAnswersNothingIsAResolutionFailureToo() {
+		// No address to connect to is the same as a name that does not resolve: retryable, not an SSRF rejection.
+		for (HostResolver answer : List.<HostResolver>of(host -> List.of(), host -> null)) {
+			DestinationPolicy candidate = new DestinationPolicy(List.of("gone.example.org"), answer);
+
+			assertThatExceptionOfType(DestinationResolutionException.class)
+				.isThrownBy(() -> candidate.check("https://gone.example.org/"))
+				.withMessage("host does not resolve");
+		}
+	}
+
+	@Test
 	void emptyAllowlistRejectsEverything() {
 		DestinationPolicy policy = new DestinationPolicy(List.of(), resolver);
 

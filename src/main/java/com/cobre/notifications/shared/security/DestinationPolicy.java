@@ -44,8 +44,10 @@ public final class DestinationPolicy {
 	}
 
 	/**
-	 * Returns the validated destination, or throws {@link RejectedDestinationException} with a reason meant for logs.
-	 * The reason should not be shown to API callers: it would reveal how internal names resolve.
+	 * Returns the validated destination. Throws {@link RejectedDestinationException}, with a reason meant for logs,
+	 * when the destination breaks a rule, and {@link DestinationResolutionException} when the name does not resolve
+	 * (a transient failure, not a rejection). The reason should not be shown to API callers: it would reveal how
+	 * internal names resolve.
 	 */
 	public Destination check(String url) {
 		URI uri = parse(url);

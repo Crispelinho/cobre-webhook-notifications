@@ -56,11 +56,12 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Sends the webhook with Apache HttpClient 5: HTTPS only, redirects never followed (a {@code 3xx} comes back as a
- * plain status) and a hard TOTAL deadline per attempt (see {@link #send}). Before every attempt the destination goes through the shared
- * {@link DestinationPolicy} (a rejection is an {@code INVALID_DESTINATION} attempt, a name that does not resolve is a
- * {@code DNS} attempt, retried, and no request is sent in either case), the
- * connection goes to the address the policy validated and never to a second DNS answer (see
- * {@link WebhookHttpClientConfiguration}), and when the subscription has a secret the body is signed with it
+ * plain status) and a hard TOTAL deadline per attempt (see {@link #send}). The deadline starts once the destination
+ * is validated: the name lookup of {@link DestinationPolicy} runs before it and has only the JVM's own timeouts.
+ * Before every attempt the destination goes through the shared {@link DestinationPolicy}: a rejection is an
+ * {@code INVALID_DESTINATION} attempt, a name that does not resolve is a {@code DNS} attempt, retried, and no request
+ * is sent in either case. The connection goes to the address the policy validated and never to a second DNS answer
+ * (see {@link WebhookHttpClientConfiguration}), and when the subscription has a secret the body is signed with it
  * ({@code Cobre-Signature}). The call blocks, which is cheap on the virtual threads that run the Kafka listeners.
  * Nothing from the request or response is logged: destinations and content stay out of the logs.
  */
@@ -131,7 +132,8 @@ class HttpsWebhookSender implements WebhookSender {
 		}
 		catch (DestinationResolutionException ex) {
 			// Transient DNS failures are retried: the notification event waits for the next attempt, not a replay.
-			log.warn("Destination of notification event {} did not resolve: {}", delivery.id().value(), ex.getMessage());
+			log.warn("Destination of notification event {} did not resolve: {}", delivery.id().value(),
+					ex.getMessage());
 			return AttemptResult.failure(attemptedAt, TransportError.DNS, elapsedMs(started));
 		}
 		catch (RejectedDestinationException ex) {
