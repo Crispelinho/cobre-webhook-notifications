@@ -64,7 +64,7 @@ Run B1 to B5 before Scenario C, while `WEBHOOK_ALLOWED_HOSTS` is still the defau
 | C6 | `/ok` receiver line | `/ok 200 <n>` once | Not recorded: the receiver window was not pasted | Not run |
 | C7 | `/fail` attempts | Five attempts, each `RETRYABLE` with `http_status` 500 | Five `RETRYABLE` lines, at 21:54:10, 21:54:42, 21:56:51, 22:04:00 and 22:38:37 | Observed |
 | C8 | `/fail` receiver lines | `/fail 500 <n>` five times | Not recorded | Not run |
-| C9 | `/fail` final status | `failed`, `last_error` `retries_exhausted` | Log: `round 1 failed: retries exhausted` at 22:38:37.801. Database not queried | Partly observed |
+| C9 | `/fail` final status | `failed`, `last_error` `http_500` (D70). Log: `round 1 failed: the last attempt of the round was retryable`, before the `Sending to DLT` line | Observed before D70: log `round 1 failed: retries exhausted` at 22:38:37.801, after the `Sending to DLT` line, with `last_error` `retries_exhausted`. Database not queried | Partly observed |
 | C10 | Dead-letter topic | `Sending to DLT` once, after attempt 5. `cobre-dead-letter` fires for 2 min | Logged at ERROR at 22:38:37.567. Grafana not checked | Partly observed |
 | C11 | Timing of `/fail` | Gaps follow the configured `demo` delays: `PT10S`, `PT30S`, `PT1M`, `PT2M` | Gaps of 32.7 s, 128.7 s, 428.5 s and 2 077.4 s. They do not match. Cause not verified | Observed (mismatch) |
 | C12 | Isolation: `payment_created` for `CLIENT002` | No notification for the `CLIENT001` subscriptions. The `202` body for an event with no match is not documented | | Not run |

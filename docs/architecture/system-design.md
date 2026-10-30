@@ -131,12 +131,12 @@ sequenceDiagram
     C->>C: validate destination (HTTPS, allowlist, IP not private)
     C->>W: POST, HMAC-signed, timeouts 2/5/10 s
     C->>DB: store attempt and apply outcome
-    Note over C,K: RETRYABLE → retry topic with backoff<br/>PERMANENT → failed<br/>exhausted → dead-letter topic → failed + alert
+    Note over C,K: RETRYABLE → retry topic with backoff<br/>PERMANENT → failed<br/>last attempt → failed in the same write, then dead-letter topic + alert (D70)
 ```
 
 ### F4. Dead-letter topic
 
-The handler marks the notification event `failed`, sets `delivery_date`, increments a metric and logs the failure. Grafana alerts on any new dead-letter message.
+The last retryable attempt of a round already marked the notification event `failed` and set `delivery_date`, in the same write as the attempt (D70). Its message then goes straight to the dead-letter topic, without another retry hop. The handler increments a metric for every dead-lettered message first, then marks the event `failed` only if it is still open (a fallback, for example when Kafka runs out of retry hops before the attempts are used up). Grafana alerts on any new dead-letter message.
 
 ### F5. Replay
 
@@ -166,7 +166,7 @@ Under the [load assumptions](../requirements/objectives.md#load-assumptions):
 |---|---|
 | Kafka down | `POST /events` keeps accepting events; the outbox accumulates them and the relay retries. An alert fires on outbox age. No data loss. |
 | PostgreSQL down | The API returns `503`. Consumers pause with backoff; Kafka retains messages. |
-| Client receiver down | Retries, then dead-letter topic, then `failed`; the client can replay. Other clients are unaffected. |
+| Client receiver down | Retries, then `failed` after the fifth attempt and a dead-letter message; the client can replay. Other clients are unaffected. |
 | Application crashes mid-delivery | The offset is not committed and the message is redelivered. The idempotency check avoids double recording, but **the webhook may be sent twice**; receivers deduplicate with `Cobre-Notification-Id`. |
 | Relay crashes after publishing, before marking | Duplicate publish, absorbed by the idempotent consumer. |
 

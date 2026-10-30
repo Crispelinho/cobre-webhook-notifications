@@ -47,7 +47,9 @@ class DispatchRetryConfiguration {
 			.autoCreateTopicsWith(partitions, (short) -1)
 			.sameIntervalTopicReuseStrategy(SameIntervalTopicReuseStrategy.MULTIPLE_TOPICS)
 			.dltHandlerMethod("dispatchDeadLetterHandler", "onDeadLetter")
-			.notRetryOn(MalformedDispatchMessageException.class)
+			// Not retried, and still dead-lettered: the dead-letter alert and metric depend on it. A malformed message has no
+			// event to retry; an exhausted one already failed its event in the same write as its last attempt.
+			.notRetryOn(List.of(MalformedDispatchMessageException.class, ExhaustedDeliveryException.class))
 			.traversingCauses();
 		if (delays.isEmpty()) {
 			builder.exponentialBackoff(initialDelay.toMillis(), multiplier, maxDelay.toMillis(), jitter.toMillis());

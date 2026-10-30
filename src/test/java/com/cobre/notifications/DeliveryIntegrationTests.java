@@ -211,6 +211,10 @@ class DeliveryIntegrationTests {
 		assertThat(attempts(id)).extracting(a -> a.get("http_status")).containsOnly(429);
 		assertThat(attempts(id)).extracting(a -> a.get("round")).containsOnly(1);
 		assertThat(notification(id).get("attempts")).isEqualTo(5);
+		// The fifth attempt fails the event at once and its message still reaches the dead-letter topic (the alert
+		// counts it), without a retry-topic hop.
+		await().atMost(Duration.ofSeconds(30)).until(() -> !recordsOf("notification.dispatch-dlt", id).isEmpty());
+		assertThat(recordsOf("notification.dispatch-retry-0", id)).isEmpty();
 	}
 
 	@Test

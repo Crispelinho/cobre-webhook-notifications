@@ -11,8 +11,10 @@ import com.cobre.notifications.notifications.application.port.in.DeliverNotifica
 
 /**
  * Consumes {@value #TOPIC} and, through the retry topics configured in {@link DispatchRetryConfiguration}, its retry
- * topics. The adapter only routes: the delivery rules decide, and a {@code RETRY} result becomes an exception so
- * Kafka moves the message to the next retry topic (or to the dead-letter topic after the last attempt).
+ * topics. The adapter only routes: the delivery rules decide. A {@code RETRY} result becomes a
+ * {@link RetryableDeliveryException}, so Kafka moves the message to the next retry topic. An {@code EXHAUSTED} result
+ * (the last attempt of the round, already failed by the delivery rules) becomes an {@link ExhaustedDeliveryException},
+ * so Kafka sends the message straight to the dead-letter topic.
  */
 @Component
 @ConditionalOnProperty(name = "app.delivery.consumer.enabled", havingValue = "true", matchIfMissing = true)
@@ -35,8 +37,12 @@ class DispatchConsumer {
 		DispatchMessage message = parser.parse(payload);
 		// Every log line written while this message is handled carries its notification event id.
 		try (MDC.MDCCloseable ignored = MDC.putCloseable(LogKeys.NOTIFICATION_EVENT_ID, message.notificationEventId())) {
-			if (delivery.deliver(message) == DeliveryResult.RETRY) {
+			DeliveryResult result = delivery.deliver(message);
+			if (result == DeliveryResult.RETRY) {
 				throw new RetryableDeliveryException(message.notificationEventId(), message.round());
+			}
+			if (result == DeliveryResult.EXHAUSTED) {
+				throw new ExhaustedDeliveryException(message.notificationEventId(), message.round());
 			}
 		}
 	}

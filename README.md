@@ -36,7 +36,7 @@ src/main/java/com/cobre/notifications/
 
 Each capability is split into `domain` (no framework dependencies), `application` (use cases and ports) and `adapters` (REST, Kafka, persistence, HTTPS).
 
-**Delivery flow:** `POST /events` → one PostgreSQL transaction stores the event, its notifications and an outbox row → an outbox relay publishes to Kafka → a consumer sends the signed webhook → transient errors go through retry topics with backoff → exhausted messages land in a dead-letter topic and the notification is marked `failed`.
+**Delivery flow:** `POST /events` → one PostgreSQL transaction stores the event, its notifications and an outbox row → an outbox relay publishes to Kafka → a consumer sends the signed webhook → transient errors go through retry topics with backoff → the last retryable attempt of a round marks the notification `failed` and its message goes straight to a dead-letter topic (D70).
 
 PostgreSQL is the source of truth. Kafka is the transport. A replay starts a new delivery round from the database.
 

@@ -460,7 +460,7 @@ Why: `HttpsWebhookSender.send` handles the two cases differently. A `Destination
 - **Failed attempt ratio (5 min)**: rises. With few events, one failure is a large share of the window.
 - **Failed notification rate above 5%** (`cobre-failed-rate`): firing after its 1-minute `for` period.
 - **Attempt failure rate including retries above 5%** (`cobre-attempt-failure-rate`): firing after its 1-minute `for` period.
-- **Message reached the dead-letter topic** (`cobre-dead-letter`): should **not** move for a `PERMANENT` outcome, because `DispatchConsumer` throws only for `RETRY` and a `PERMANENT` outcome does not throw. A host that does not resolve gives `dns_error`, which is `RETRYABLE`. In that case the message goes to `notification.dispatch-dlt` only after the last retryable attempt (the fifth), so the counter moves and the alert fires for two minutes, as in Scenario C.
+- **Message reached the dead-letter topic** (`cobre-dead-letter`): should **not** move for a `PERMANENT` outcome, because `DispatchConsumer` throws only for `RETRY` and `EXHAUSTED`, and a `PERMANENT` outcome does not throw. A host that does not resolve gives `dns_error`, which is `RETRYABLE`. In that case the fifth attempt fails the event and the message goes straight to `notification.dispatch-dlt` (D70), so the counter moves and the alert fires for two minutes, as in Scenario C.
 - **Oldest unpublished outbox row older than 60 s** (`cobre-outbox-age`): should stay normal.
 
 ### Scenario B: rejected destinations
@@ -550,16 +550,16 @@ Expected: `202`, with two notification event ids, one per subscription.
 | Subscription | Receiver window | Final `delivery_status` | Attempts |
 |---|---|---|---|
 | `/ok` | `/ok 200 <n>` once | `completed`, `delivered_at` set | 1 (`http_status` 200, `delivery_attempts` round 1) |
-| `/fail` | `/fail 500 <n>` five times | `failed`, `last_error` `retries_exhausted` | 5 (`attempt_number` 1 to 5, `http_status` 500) |
+| `/fail` | `/fail 500 <n>` five times | `failed`, `last_error` `http_500` | 5 (`attempt_number` 1 to 5, `http_status` 500) |
 
-For `/fail`, the second run in [Verified run](#verified-run) measured the first three attempts at about +0 s, +11 s and +42 s. A later run measured all five at +0 s, +33 s, +161 s, +590 s and +2 667 s (44 minutes), which does not match the configured delays; see [Observed run](#observed-run-2026-10-29). The sequence does not take four minutes, as an earlier estimate in this section said. Plan for up to 45 minutes, and read the real times from `delivery_attempts.attempted_at`. `last_error` is `retries_exhausted` because a `500` response has no transport error type (`Delivery`).
+For `/fail`, the second run in [Verified run](#verified-run) measured the first three attempts at about +0 s, +11 s and +42 s. A later run measured all five at +0 s, +33 s, +161 s, +590 s and +2 667 s (44 minutes), which does not match the configured delays; see [Observed run](#observed-run-2026-10-29). The sequence does not take four minutes, as an earlier estimate in this section said. Plan for up to 45 minutes, and read the real times from `delivery_attempts.attempted_at`. `last_error` is `http_500`, the error type of the fifth attempt, which is set in the same write that marks the event `failed` (D70). Runs before D70 ended with `retries_exhausted`, written by the dead-letter handler.
 
 **Grafana while C runs:**
 
 - **Delivery attempts per second by outcome**: `success` for `/ok`, `retryable` for `/fail` (a `500` is `RETRYABLE` in `DeliveryOutcome.classify`).
 - **Attempt failure rate including retries above 5%** (`cobre-attempt-failure-rate`): firing if the window holds only these attempts, because five of six are not `success`. Scenario A's attempt is also in the window if it ran recently.
 - **Failed notification rate above 5%** (`cobre-failed-rate`): firing once `/fail` ends as `failed`.
-- **Message reached the dead-letter topic**: rises by one. The message goes to the dead-letter topic only after the last retryable attempt, the fifth. The observed run logged `Record: … won't be retried. Sending to DLT with name notification.dispatch-dlt` at ERROR, followed by `round 1 failed: retries exhausted`. Compare with the baseline. `cobre-dead-letter` fires for two minutes after that.
+- **Message reached the dead-letter topic**: rises by one. The message goes to the dead-letter topic only after the last retryable attempt, the fifth. Expected now (D70): `Notification event … round 1 failed: the last attempt of the round was retryable` at ERROR from `DeliveryService`, then `Record: … won't be retried. Sending to DLT with name notification.dispatch-dlt` at ERROR, with no `retries exhausted` line. The run in [Observed run](#observed-run-2026-10-29) predates D70 and logged the two in the opposite order: `Sending to DLT`, then `round 1 failed: retries exhausted`. Compare with the baseline. `cobre-dead-letter` fires for two minutes after that.
 
 ### Verification in Grafana
 
@@ -599,6 +599,7 @@ For `/fail`, the second run in [Verified run](#verified-run) measured the first 
 ### Known gaps for the demo
 
 - **DNS failures.** `dns_error` is implemented on `origin/develop` (PR #32, decision D54; D66 in [the decision log](../architecture/decision-log.md) names the error type). A name that does not resolve is retried up to five attempts per round, then ends `failed`. A name that resolves to a non-public address is not retried (`invalid_destination`). The real-DNS case was not exercised in the observed run: on the machine where the observed run took place, `webhook.example.com` resolved to a private address. Check the outcome of `dns_error` in the observed run before you rely on it.
+- **Dead-letter publish gap (D70, theoretical, not reproduced).** The fifth attempt marks the event `failed` before its message is published to the dead-letter topic. If the process stops between the two, the redelivered message is ignored because the event is final, so it never reaches the dead-letter topic and `cobre-dead-letter` does not count it. `cobre-failed-rate` still counts the event. Before D70 the event stayed `retrying` and the dead-letter handler failed it.
 - **Test receiver.** It does not verify signatures (see Scenario C).
 - **Attempt timings.** The configured `demo` delays do not match the gaps of the observed run (+33 s, +129 s, +428 s and +2 077 s between attempts). The cause is not verified. Check the profiles the service started with (Spring logs them at startup) before you rely on any timing.
 - **Grafana access.** The login is not in this repository.
@@ -622,8 +623,8 @@ A console log of the service, started from the main checkout (`cobre-webhook-not
 | 22:11:46 | Two `subscription.deactivate` audit lines, `success` (`01a18823-2854…` and `01a18823-26d4…`) | Cleanup of two subscriptions. Which ones is not confirmed |
 | 22:16:28 and 22:16:33 | WARN from `HikariPool-1`: `Failed to validate connection … (This connection has been closed.)` | Cause not explained. No attempt in the log is affected |
 | 22:38:37.559 | Attempt 5, `RETRYABLE` (+2 077.4 s after attempt 4). Retry topic `notification.dispatch-retry-3` | Attempt 5 happened, 34 minutes after attempt 4. The gap is not confirmed (see below) |
-| 22:38:37.567 | ERROR: the message is sent to `notification.dispatch-dlt`, with a full stack trace | Dead-letter path, after the last attempt |
-| 22:38:37.801 | ERROR: `Notification event 01a18aba-a19b-743c-91e1-bf7a93ad6983 round 1 failed: retries exhausted` | `failed` with `retries_exhausted`, as the code path defines it. The database was not queried |
+| 22:38:37.567 | ERROR: the message is sent to `notification.dispatch-dlt`, with a full stack trace | Dead-letter path, after the last attempt. Observed before D70; now attempt 5 fails the event first, and this line is the same dead-letter path without a further retry hop |
+| 22:38:37.801 | ERROR: `Notification event 01a18aba-a19b-743c-91e1-bf7a93ad6983 round 1 failed: retries exhausted` | Observed before D70: `failed` with `retries_exhausted`, written by the dead-letter handler. Now the equivalent line is logged before the dead-letter line, as `round 1 failed: the last attempt of the round was retryable`, and `last_error` is `http_500`. The database was not queried |
 
 What this run shows:
 
@@ -635,7 +636,7 @@ What this run shows:
 Not verified, and needed to close this run:
 
 - The number of `/fail 500` lines in the receiver window. The paste did not include it.
-- The state of the `/fail` notification in the database (`failed`, `retries_exhausted`, five attempts). The log says it, but no query confirmed it.
+- The state of the `/fail` notification in the database (before D70: `failed`, `retries_exhausted`, five attempts; now `last_error` `http_500`). The log says it, but no query confirmed it.
 - Grafana: `notification_dead_letter_total` and the four alert rules after this run.
 - The startup profile line of this run.
 - Which two subscriptions were deactivated at 22:11:46, and whether one of them is the subscription outside the test.
