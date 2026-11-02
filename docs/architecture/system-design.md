@@ -44,7 +44,7 @@ flowchart LR
     worker -- OTLP --> lgtm
 ```
 
-Both roles are the same deployable (D31): the diagram shows the roles, not two services.
+Both roles are the same deployable (D31): the diagram shows the roles, not two services. A role is configuration, not a separate artifact: `app.delivery.consumer.enabled` starts the Kafka consumers and `app.outbox.relay.enabled` starts the outbox relay. The `api` deployment turns both off, and the `worker` deployment keeps them on.
 
 | Container | Responsibility |
 |---|---|
@@ -59,11 +59,11 @@ Both roles are the same deployable (D31): the diagram shows the roles, not two s
 events/          domain: Event, SubscriptionMatcher
                  application: IngestEventUseCase
                  adapters: in REST /events · out persistence + outbox
-notifications/   domain: NotificationEvent, DeliveryAttempt, DeliveryStatus, DeliveryOutcome, RetryPolicy
+notifications/   domain: NotificationEvent, DeliveryAttempt, DeliveryStatus, DeliveryOutcome
                  application: ListNotificationEvents, GetNotificationEvent, ReplayNotificationEvent,
-                              DispatchNotificationEvent, MarkExhausted
+                              DispatchNotificationEvent, FailExhaustedNotification
                  ports out: NotificationRepository, DispatchPublisher, WebhookSender,
-                            SignatureService, SecretCipher, DestinationResolver, Clock
+                            WebhookSigner, SecretCipher, DestinationValidator, Clock
                  adapters: in REST, Kafka consumers, outbox relay scheduler, seed loader
                            out persistence, Kafka producer, HTTPS client
 subscriptions/   domain: Subscription, DestinationPolicy
@@ -86,7 +86,7 @@ flowchart LR
     subgraph app["Application"]
         query["ListNotificationEvents, GetNotificationEvent"]
         replay["ReplayNotificationEvent"]
-        dispatch["DispatchNotificationEvent, MarkExhausted"]
+        dispatch["DispatchNotificationEvent, FailExhaustedNotification"]
     end
     subgraph domain["Domain"]
         nev["NotificationEvent, DeliveryAttempt"]
@@ -96,7 +96,7 @@ flowchart LR
         repo["NotificationRepository: JDBC"]
         pub["DispatchPublisher: Kafka producer"]
         http["WebhookSender: HTTPS client"]
-        dest["DestinationResolver: DestinationPolicy"]
+        dest["DestinationValidator: DestinationPolicy"]
     end
     rest --> query
     rest --> replay
@@ -120,7 +120,7 @@ The domain never imports a framework or an adapter (`HexagonalArchitectureTests`
 |---|---|
 | `events` | `id`, `client_id`, `event_type`, `content`, `created_at` |
 | `subscriptions` | `id`, `client_id`, `url`, `event_types[]`, `active`, `secret_ciphertext`, `created_at` |
-| `notifications` | `id`, `event_id`, `subscription_id`, `client_id` (denormalized for isolation), `destination_url` (snapshot), `delivery_status`, `round`, `attempts`, `created_at`, `delivery_date`, `delivered_at`, `last_error`, `version` (optimistic locking) |
+| `notifications` | `id`, `event_id`, `subscription_id`, `client_id` (denormalized for isolation), `destination_url` (snapshot), `delivery_status`, `round`, `attempts`, `created_at`, `delivery_date`, `delivered_at`, `last_error`, `version` (optimistic locking), `lease_owner`, `lease_expires_at`, `generation` (processing lease and fencing token, D56), `next_attempt_at` (persisted `Retry-After` schedule, D68) |
 | `delivery_attempts` | `notification_id`, `round`, `attempt_number`, `http_status`, `error_type`, `latency_ms`, `attempted_at`; unique `(notification_id, round, attempt_number)` |
 | `outbox` | `id`, `notification_id`, `round`, `payload`, `created_at`, `published_at` |
 
@@ -173,7 +173,7 @@ sequenceDiagram
     K->>C: dispatch message
     C->>DB: load notification event (skip if completed or older round)
     C->>C: validate destination (HTTPS, allowlist, IP not private)
-    C->>W: POST, HMAC-signed, timeouts 2/5/10 s
+    C->>W: POST, HMAC-signed, connect timeout 2 s, request timeout 10 s (the DNS lookup has its own 5 s deadline, #38)
     C->>DB: store attempt and apply outcome
     Note over C,K: RETRYABLE → retry topic with backoff<br/>PERMANENT → failed<br/>last attempt → failed in the same write, then dead-letter topic + alert (D70)
 ```
@@ -300,4 +300,4 @@ flowchart LR
     api -. "Validates JWTs (JWKS)" .-> idp
 ```
 
-The `api` and `worker` roles run from the same image (D31) as separate deployments, so each can be scaled independently. Only the `worker` role makes outbound webhook calls, which keeps the SSRF-relevant egress in one place.
+The `api` and `worker` roles run from the same image (D31) as separate deployments, configured with the flags above, so each can be scaled independently. Only the `worker` role makes outbound webhook calls, which keeps the SSRF-relevant egress in one place.
