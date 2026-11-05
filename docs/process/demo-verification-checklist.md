@@ -81,6 +81,16 @@ Run B1 to B5 before Scenario C, while `WEBHOOK_ALLOWED_HOSTS` is still the defau
 | R5 | `GET /notification_events?delivery_status=failed` | Only failed notifications of the client, paginated | `200`, only `failed` notifications (2026-10-30) | Observed |
 | R6 | `GET /notification_events?delivery_status=completed&created_from=2024-03-14T00:15:45Z&created_to=2024-03-15T10:15:45Z` with `CLIENT001` | `200` with the completed notifications created inside the window, only for the token's client. The window returns `EVT001` and `EVT002`; `created_to` is inclusive at `10:15:45` according to SQL | Not run through the API. SQL (2026-11-05) confirms the two rows | Not run |
 
+## 5b. Access isolation and duplicate subscriptions
+
+| ID | Check | Expected | Observed | Status |
+|---|---|---|---|---|
+| AC1 | `GET /notification_events/{id}` with the `CLIENT002` token, on a `CLIENT001` notification | `404`, `Notification event not found.`, the same text as for a missing id | | Not run |
+| AC2 | `PATCH /subscriptions/{id}` with the `CLIENT002` token, on a `CLIENT001` subscription | `404`, `Subscription not found.`; the subscription does not change | | Not run |
+| AC3 | `DELETE /subscriptions/{id}` with the `CLIENT002` token, on a `CLIENT001` subscription | `404`; the subscription stays active | | Not run |
+| AC4 | `POST /notification_events/{id}/replay` with the `CLIENT002` token, on a failed `CLIENT001` notification | `404`; no new round and no new attempt | | Not run |
+| AC5 | Two `POST /subscriptions` with the same URL and `event_types`, same client | Two subscriptions with different ids and secrets. Each matching event produces two notifications, one per subscription | | Not run |
+
 ## 6. Grafana
 
 | ID | Check | Expected | Observed | Status |
