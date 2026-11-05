@@ -334,6 +334,16 @@ Response `200`:
 
 To read every page, request `page` from 0 to `total_pages - 1`. Only the notifications of the token's client come back.
 
+### Example: completed notifications in a time window
+
+Only the notifications of the token's client come back, and `created_from` and `created_to` take UTC instants ending in `Z`:
+
+```bash
+curl -s "http://localhost:8081/notification_events?delivery_status=completed&page=0&size=20&created_from=2024-03-14T00:15:45Z&created_to=2024-03-15T10:15:45Z"   -H "Authorization: Bearer $CLIENT_TOKEN"
+```
+
+With the seed data of `CLIENT001`, the window above returns `EVT001` (created `09:30:22Z`) and `EVT002` (created `10:15:45Z`). SQL on 2026-11-05 confirms both rows and shows that `created_to` includes `10:15:45`. The API call itself has not been run against the stack yet. An offset such as `-05:00` instead of `Z` gives `400`.
+
 ### `GET /notification_events/{notification_event_id}`
 
 Response `200`: the same fields as the list, plus `attempts`, one object per attempt:
