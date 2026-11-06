@@ -21,6 +21,10 @@ spring:
       # ...and the consumer continues that trace, so the relay publish, every attempt and the webhook call that
       # follows share one trace ID in logs and traces.
       observation-enabled: true
+      # One consumer thread per partition of notification.dispatch. Each thread blocks on its own webhook call, so a
+      # slow receiver holds back only its partition. Threads beyond the partition count would sit idle, so the value
+      # follows app.dispatch.partitions. Applies to the retry-topic listeners too.
+      concurrency: ${app.dispatch.partitions:3}
     consumer:
       group-id: notification-service
       auto-offset-reset: earliest
@@ -86,6 +90,9 @@ app:
     # Counted in memory per instance (D29).
     enabled: true
     requests-per-minute: 100
+    # Per-producer limit on POST /events (scope events:write). Counted in memory per instance, like the limit above.
+    # 600 per minute is a starting value, not a measured capacity: calibrate it with a load test.
+    producer-requests-per-minute: 600
   seed:
     # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
     enabled: false
