@@ -90,6 +90,9 @@ app:
     # Counted in memory per instance (D29).
     enabled: true
     requests-per-minute: 100
+    # Per-producer limit on POST /events (scope events:write). Counted in memory per instance, like the limit above.
+    # 600 per minute is a starting value, not a measured capacity: calibrate it with a load test.
+    producer-requests-per-minute: 600
   seed:
     # Loads seed/notification_events.json (the challenge sample) at startup. Enabled in the local profile.
     enabled: false
