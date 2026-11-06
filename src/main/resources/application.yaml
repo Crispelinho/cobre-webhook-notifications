@@ -21,6 +21,10 @@ spring:
       # ...and the consumer continues that trace, so the relay publish, every attempt and the webhook call that
       # follows share one trace ID in logs and traces.
       observation-enabled: true
+      # One consumer thread per partition of notification.dispatch. Each thread blocks on its own webhook call, so a
+      # slow receiver holds back only its partition. Threads beyond the partition count would sit idle, so the value
+      # follows app.dispatch.partitions. Applies to the retry-topic listeners too.
+      concurrency: ${app.dispatch.partitions:3}
     consumer:
       group-id: notification-service
       auto-offset-reset: earliest
