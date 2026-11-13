@@ -1,0 +1,142 @@
+Vamos a desarrollar un reto técnico para la empresa Cobre desde cero. Todavía no existe repositorio Git, proyecto Spring Boot ni estructura de código.
+
+Trabajaremos con un enfoque híbrido ODD + SDD, utilizando OpenSpec para gestionar las especificaciones y los cambios.
+
+En esta primera etapa, no crees el proyecto Spring Boot, no ejecutes Spring Initializr, no inicialices Git, no instales dependencias y no modifiques archivos.
+
+Primero quiero refinar el problema y diseñar la solución.
+
+1. Analiza el enunciado de Cobre y el JSON de eventos que te proporcionaré.
+2. Define los resultados esperados y los criterios objetivos de éxito.
+3. Identifica las ambigüedades que podrían afectar a la arquitectura.
+4. Hazme preguntas priorizadas en grupos de tres a cinco, recomendando alternativas y explicando sus trade-offs.
+5. Diseña una arquitectura candidata y sus flujos principales, pero marca las decisiones pendientes como provisionales.
+6. Propón las especificaciones y capacidades que deberíamos gestionar con OpenSpec.
+7. Cuando hayamos aprobado el diseño, propón la estructura del repositorio y la configuración de Spring Initializr.
+8. Solo después de mi aprobación explícita comenzaremos a crear archivos y código.
+
+No inventes archivos existentes, resultados de comandos ni decisiones que todavía no hayamos tomado.
+
+**Tu primera respuesta debe centrarse en el refinamiento de requisitos y las preguntas que necesito contestar. No implementes nada todavía.**
+
+
+Ciclo de Trabajo:
+
+1. ODD: definir el resultado
+
+Objetivos, restricciones y criterios de éxito
+
+2. Refinamiento interactivo
+
+OpenCode pregunta, propone alternativas y registra decisiones
+
+3. SDD + OpenSpec
+
+Requisitos, escenarios Given/When/Then y propuesta de cambio
+
+4. Aprobación humana
+
+No implementar hasta recibir tu aprobación
+
+5. Implementar y verificar
+
+Código, tests, revisión de seguridad y trazabilidad
+
+
+
+
+
+1. Relación entre fases y tareas de Cobre
+Fase 1
+Refinamiento de requisitos — ODD
+
+Prepara las tres tareas.
+
+Analizar el enunciado, identificar ambigüedades, acordar el alcance, definir criterios de éxito y decidir qué se implementará frente a lo que solo se documentará.
+
+
+Fase 2
+Diseño de la solución
+
+Principalmente Tarea 1 — System Design.
+
+Diseñar componentes, flujos de eventos, suscripciones, entrega de webhooks, reintentos, persistencia, observabilidad, escalabilidad y resiliencia. También definir los contratos y límites de seguridad de la API.
+
+
+Fase 3
+Especificación — SDD + OpenSpec
+
+Prepara la implementación de las tareas 1, 2 y 3.
+
+Convertir las decisiones aprobadas en requisitos, escenarios de aceptación, contratos API, criterios de seguridad y tareas trazables.
+
+
+Fase 4
+Creación del repositorio y cascarón
+
+Infraestructura de trabajo para la Tarea 2.
+
+Generar el proyecto Spring Boot, configurar Maven, definir los paquetes hexagonales, preparar Git y establecer la base de pruebas. No constituye por sí misma una tarea evaluable independiente.
+
+
+Fase 5
+Implementación y validación
+
+Principalmente Tareas 2 y 3; valida también la Tarea 1.
+
+Implementar la API y la entrega de webhooks, verificar los criterios de aceptación, probar los reintentos y aplicar las medidas de seguridad.
+
+
+Fase 6
+Preparación de la entrega y defensa
+
+Cierra las tres tareas.
+
+Preparar diagramas, README, pruebas, repositorio GitHub, documentación del uso de IA y respuestas para la presentación ante el panel.
+
+
+2. Trazabilidad directa con las tareas evaluadas
+Entregable de Cobre	Fases que lo cubren	Resultado esperado
+Tarea 1. System Design	1, 2, 3 y 6	Arquitectura documentada, diagramas, decisiones justificadas y estrategia de escalabilidad y resiliencia.
+Tarea 2. API implementation	3, 4, 5 y 6	Repositorio Java/Spring Boot, arquitectura hexagonal, entrega HTTPS de webhooks, tres endpoints REST y pruebas automatizadas.
+Tarea 3. Security	1, 2, 3, 5 y 6	Análisis de riesgos OWASP Top 10, mitigaciones documentadas y pruebas de seguridad de las medidas implementadas.
+Documentación del uso de IA	Todas, especialmente 5 y 6	Registro de cómo se utilizó la IA, decisiones verificadas y validaciones realizadas.
+
+3. Cómo organizaría el trabajo dentro de OpenSpec
+No crearía una propuesta gigantesca que mezcle toda la solución. Organizaría las especificaciones por capacidades funcionales, manteniendo una visión arquitectónica común.
+Propuesta inicial: diseño de la plataforma
+
+Tarea 1
+
+Arquitectura, componentes, modelo de datos, flujos de eventos, reintentos, resiliencia y observabilidad.
+
+
+Capacidad: API de autoservicio
+
+Tarea 2
+
+Listado con filtros, consulta individual, paginación, autorización por cliente y endpoint de replay.
+
+
+Capacidad: entrega de notificaciones
+
+Tarea 2
+
+Suscripciones, envío HTTPS, timeouts, reintentos, idempotencia y persistencia de los resultados.
+
+
+Capacidad: seguridad de la plataforma
+
+Tarea 3
+
+Autenticación, aislamiento entre clientes, validación de URL, prevención de SSRF, límites de consumo y auditoría.
+
+
+Capacidad transversal: calidad y entrega
+
+Todas las tareas
+
+Pruebas, observabilidad, documentación, ejecución local y preparación de la defensa.
+
+
+Estos son grupos de trabajo propuestos, no nombres de cambios OpenSpec que debamos crear obligatoriamente de antemano. Los concretaremos según las convenciones de la versión instalada.

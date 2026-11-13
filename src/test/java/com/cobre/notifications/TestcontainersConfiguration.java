@@ -1,0 +1,66 @@
+package com.cobre.notifications;
+
+import java.security.SecureRandom;
+import java.util.Base64;
+
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.DynamicPropertyRegistrar;
+import org.testcontainers.kafka.KafkaContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
+
+import com.cobre.notifications.shared.crypto.WebhookSecrets;
+
+@TestConfiguration(proxyBeanMethods = false)
+@Import(FakeDnsConfiguration.class)
+class TestcontainersConfiguration {
+
+	@Bean
+	@ServiceConnection
+	KafkaContainer kafkaContainer() {
+		return new KafkaContainer(DockerImageName.parse("apache/kafka-native:4.4.0"));
+	}
+
+	@Bean
+	@ServiceConnection
+	PostgreSQLContainer postgresContainer() {
+		return new PostgreSQLContainer(DockerImageName.parse("postgres:18.6"));
+	}
+
+	/**
+	 * Makes the application trust {@link TestJwtIssuer#trusted()} tokens.
+	 */
+	@Bean
+	DynamicPropertyRegistrar jwtProperties() {
+		return registry -> {
+			registry.add("app.security.jwt.public-key-location", TestJwtIssuer::trustedPublicKeyLocation);
+			registry.add("app.security.jwt.issuer", () -> TestJwtIssuer.ISSUER);
+			registry.add("app.security.jwt.audience", () -> TestJwtIssuer.AUDIENCE);
+		};
+	}
+
+	/**
+	 * A fresh webhook secrets key per test run, so no key is ever committed for tests.
+	 */
+	@Bean
+	DynamicPropertyRegistrar webhookSecretsKey() {
+		byte[] bytes = new byte[32];
+		new SecureRandom().nextBytes(bytes);
+		String key = Base64.getEncoder().encodeToString(bytes);
+		return registry -> registry.add("app.webhook.secrets-key", () -> key);
+	}
+
+	/**
+	 * A fresh seed secret per test run, so no secret is committed for tests. Needed by every test that sets
+	 * {@code app.seed.enabled=true}.
+	 */
+	@Bean
+	DynamicPropertyRegistrar seedSecret() {
+		String secret = WebhookSecrets.generate();
+		return registry -> registry.add("app.seed.secret", () -> secret);
+	}
+
+}

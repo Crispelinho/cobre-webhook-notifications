@@ -1,0 +1,11 @@
+apiVersion: 1
+
+# Loads the delivery dashboard that compose.yaml mounts at /var/lib/cobre/dashboards.
+providers:
+  - name: "Notification delivery"
+    type: file
+    # Same folder as the alert rules, so the demo finds both in one place.
+    folder: "Notification delivery"
+    options:
+      path: /var/lib/cobre/dashboards
+      foldersFromFilesStructure: false

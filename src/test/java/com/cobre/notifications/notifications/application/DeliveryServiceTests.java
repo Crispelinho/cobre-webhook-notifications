@@ -1,0 +1,691 @@
+package com.cobre.notifications.notifications.application;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
+import org.junit.jupiter.api.Test;
+
+import com.cobre.notifications.notifications.application.port.out.DeliveryMetrics;
+import com.cobre.notifications.notifications.application.port.out.DeliveryStore;
+import com.cobre.notifications.notifications.application.port.out.WebhookSender;
+import com.cobre.notifications.notifications.domain.AttemptResult;
+import com.cobre.notifications.notifications.domain.Delivery;
+import com.cobre.notifications.notifications.domain.DeliveryAttempt;
+import com.cobre.notifications.notifications.domain.DeliveryOutcome;
+import com.cobre.notifications.notifications.domain.DeliveryStatus;
+import com.cobre.notifications.notifications.domain.Lease;
+import com.cobre.notifications.notifications.domain.NotificationEventId;
+import com.cobre.notifications.notifications.domain.TransportError;
+
+class DeliveryServiceTests {
+
+	private static final Instant NOW = Instant.parse("2026-01-01T00:00:10Z");
+
+	private final FakeStore store = new FakeStore();
+
+	private final List<Delivery> sent = new ArrayList<>();
+
+	private AttemptResult nextResult = AttemptResult.response(NOW, 200, 20);
+
+	private final WebhookSender sender = delivery -> {
+		sent.add(delivery);
+		return nextResult;
+	};
+
+	private final DeliveryService service = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5);
+
+	@Test
+	void aSuccessfulAttemptIsRecordedAndCompletesTheEvent() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(sent).hasSize(1);
+		assertThat(store.attempts).singleElement().satisfies(attempt -> {
+			assertThat(attempt.round()).isEqualTo(1);
+			assertThat(attempt.attemptNumber()).isEqualTo(1);
+			assertThat(attempt.httpStatus()).isEqualTo(200);
+			assertThat(attempt.errorType()).isNull();
+		});
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+	}
+
+	@Test
+	void aRetryableFailureAsksTheTransportToRetryAndKeepsTheEventOpen() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 503, 20);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+		assertThat(store.attempts).singleElement().extracting(DeliveryAttempt::errorType).isEqualTo("http_503");
+	}
+
+	@Test
+	void aPendingFirstRoundDeliveryIsSentEvenIfItsSubscriptionWasDeactivatedAfterItWasAccepted() {
+		// D67: the store has no inactivity gate, so deactivation cannot turn an accepted notification into a failure.
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(sent).hasSize(1);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+	}
+
+	@Test
+	void aFirstRoundRetryIsSentEvenIfItsSubscriptionWasDeactivated() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 2);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(sent).hasSize(1);
+	}
+
+	@Test
+	void aReplayRoundIsSentLikeAnyOtherDelivery() {
+		store.current = delivery(DeliveryStatus.PENDING, 2, 0);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 2))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(sent).hasSize(1);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+	}
+
+	@Test
+	void aDestinationThatFailsValidationEndsTheDeliveryAndTheReplayAsFailed() {
+		nextResult = AttemptResult.failure(NOW, TransportError.INVALID_DESTINATION, 0);
+		for (int round : new int[] { 1, 2 }) {
+			store.current = delivery(DeliveryStatus.PENDING, round, 0);
+
+			assertThat(service.deliver(new DispatchMessage("N1", round))).isEqualTo(DeliveryResult.FAILED);
+
+			assertThat(store.current.lastError()).isEqualTo("invalid_destination");
+		}
+	}
+
+	@Test
+	void aSubscriptionWithoutASecretEndsTheDeliveryAndTheReplayAsMissingSecret() {
+		nextResult = AttemptResult.failure(NOW, TransportError.MISSING_SECRET, 0);
+		for (int round : new int[] { 1, 2 }) {
+			store.current = delivery(DeliveryStatus.PENDING, round, 0);
+
+			assertThat(service.deliver(new DispatchMessage("N1", round))).isEqualTo(DeliveryResult.FAILED);
+
+			assertThat(store.current.lastError()).isEqualTo("missing_secret");
+		}
+	}
+
+	@Test
+	void reactivatingTheSubscriptionDoesNotReopenAFailedNotification() {
+		store.current = delivery(DeliveryStatus.FAILED, 1, 5);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+	}
+
+	@Test
+	void aValidRetryAfterSchedulesTheNextAttemptExactlyThatFarAheadWithoutARetryTopicMessage() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(120));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+
+		assertThat(store.delay).isEqualTo(Duration.ofSeconds(120));
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+		assertThat(store.attempts).singleElement().extracting(DeliveryAttempt::errorType).isEqualTo("http_429");
+	}
+
+	@Test
+	void aRetryAfterShorterThanTheBackoffStepSchedulesExactlyThatFarAheadReplacingTheStep() {
+		// Next backoff step would be 60 s; the receiver asked for 5 s, which replaces it (D53).
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(5));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+
+		assertThat(store.delay).isEqualTo(Duration.ofSeconds(5));
+	}
+
+	@Test
+	void theRetryAfterCapMustBePositive() {
+		for (Duration invalid : new Duration[] { Duration.ZERO, Duration.ofSeconds(-1) }) {
+			assertThatIllegalArgumentException()
+				.isThrownBy(() -> new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5,
+						DeliveryMetrics.NONE, DeliveryService.DEFAULT_LEASE_DURATION, invalid))
+				.withMessageContaining("retryAfterCap");
+		}
+	}
+
+	@Test
+	void aRetryAfterAboveTheCapSchedulesAtTheCapNeverEarlier() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 503, 20, Duration.ofSeconds(86_400));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+
+		assertThat(store.delay).isEqualTo(Duration.ofSeconds(300));
+	}
+
+	@Test
+	void theCapIsConfigurable() {
+		DeliveryService capped = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5,
+				DeliveryMetrics.NONE, DeliveryService.DEFAULT_LEASE_DURATION, Duration.ofSeconds(60));
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(120));
+
+		capped.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(store.delay).isEqualTo(Duration.ofSeconds(60));
+	}
+
+	@Test
+	void aRetryableAnswerWithoutRetryAfterKeepsTheConfiguredBackoff() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+
+		assertThat(store.delay).isNull();
+	}
+
+	@Test
+	void retryAfterNeverAddsAttemptsAndASixthRequestIsNeverSent() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(5));
+
+		for (int attempt = 1; attempt <= 4; attempt++) {
+			assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.SCHEDULED);
+			// The scheduler clears the time and enqueues a message; simulate that claim.
+			store.current = withoutNextAttempt(store.current);
+		}
+		// The fifth attempt uses the last one: nothing is scheduled and the event fails in that same call.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+		assertThat(store.delay).isNull();
+		assertThat(store.attempts).hasSize(5);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+
+		// A sixth message sends nothing.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).hasSize(5);
+		assertThat(store.attempts).hasSize(5);
+	}
+
+	@Test
+	void aCompletedNotificationKeepsItsSuccessWhenTheSubscriptionIsLaterInactive() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		service.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).hasSize(1);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+		assertThat(store.current.lastError()).isNull();
+	}
+
+	@Test
+	void aMessageThatArrivesBeforeTheScheduledTimeSendsNothing() {
+		store.current = withNextAttempt(delivery(DeliveryStatus.RETRYING, 1, 1), NOW.plusSeconds(60));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.attempts).isEmpty();
+		assertThat(store.current.nextAttemptAt()).isEqualTo(NOW.plusSeconds(60));
+		assertThat(store.delay).isNull();
+	}
+
+	@Test
+	void aRetryAfterOnTheFifthAttemptSendsNoSixthRequestAndSchedulesNoRow() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(30));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+
+		assertThat(store.attempts).hasSize(1);
+		assertThat(store.delay).isNull();
+		assertThat(store.current.nextAttemptAt()).isNull();
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+		assertThat(sent).hasSize(1);
+	}
+
+	@Test
+	void aRetryableFifthAttemptFailsTheEventInTheSameCallAndGoesStraightToTheDeadLetter() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
+		nextResult = AttemptResult.response(NOW, 503, 20);
+
+		assertThat(observed.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+
+		assertThat(store.attempts).singleElement().satisfies(attempt -> assertThat(attempt.attemptNumber()).isEqualTo(5));
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.attemptsInRound()).isEqualTo(5);
+		assertThat(store.current.deliveryDate()).isNotNull();
+		assertThat(store.current.lastError()).isEqualTo("http_503");
+		assertThat(store.current.nextAttemptAt()).isNull();
+		assertThat(store.delay).isNull();
+		assertThat(metrics.finals).hasSize(1);
+	}
+
+	@Test
+	void aRetryAfterOnTheRetryableFifthAttemptAlsoFailsTheEventInTheSameCall() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
+		nextResult = AttemptResult.response(NOW, 429, 20, Duration.ofSeconds(30));
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+
+		assertThat(store.attempts).hasSize(1);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.deliveryDate()).isNotNull();
+		assertThat(store.current.nextAttemptAt()).isNull();
+		assertThat(store.delay).isNull();
+		assertThat(sent).hasSize(1);
+	}
+
+	@Test
+	void aPermanentFailureIsRecordedAndStops() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 404, 20);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.attempts).hasSize(1);
+	}
+
+	@Test
+	void theAttemptNumberContinuesFromTheAttemptsAlreadyRecordedInTheRound() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 2);
+		nextResult = AttemptResult.failure(NOW, TransportError.TIMEOUT, 10_000);
+
+		service.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(store.attempts).singleElement().satisfies(attempt -> {
+			assertThat(attempt.attemptNumber()).isEqualTo(3);
+			assertThat(attempt.errorType()).isEqualTo("timeout");
+			assertThat(attempt.httpStatus()).isNull();
+		});
+	}
+
+	@Test
+	void timeoutsAreRetriedButTheFiveAttemptsPerRoundLimitStillApplies() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.failure(NOW, TransportError.TIMEOUT, 10_000);
+
+		for (int attempt = 1; attempt <= 4; attempt++) {
+			// A timeout is retryable and never completes the event, however late the receiver finally answers.
+			assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+			assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+			assertThat(store.attempts).hasSize(attempt);
+		}
+		// The fifth timeout uses the last attempt and fails the event in that same call.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+		assertThat(store.attempts).hasSize(5);
+		assertThat(store.attempts).allSatisfy(attempt -> assertThat(attempt.errorType()).isEqualTo("timeout"));
+
+		// A sixth message (a duplicate) sends nothing.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).hasSize(5);
+		assertThat(store.attempts).hasSize(5);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.lastError()).isEqualTo("timeout");
+	}
+
+	@Test
+	void dnsFailuresUseTheFiveAttemptsOfTheRoundThenFailTheEvent() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.failure(NOW, TransportError.DNS, 5_000);
+
+		for (int attempt = 1; attempt <= 4; attempt++) {
+			assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+			assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+			assertThat(store.attempts).hasSize(attempt);
+		}
+		// The fifth DNS failure uses the last attempt and fails the event in that same call.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+		assertThat(store.attempts).hasSize(5);
+		assertThat(store.attempts).allSatisfy(attempt -> {
+			assertThat(attempt.errorType()).isEqualTo("dns_error");
+			assertThat(attempt.httpStatus()).isNull();
+		});
+
+		// The sixth message sends nothing: the five DNS attempts of the round are used up.
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).hasSize(5);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.lastError()).isEqualTo("dns_error");
+	}
+
+	@Test
+	void aFirstDnsFailureThenACompletedAttemptCompletesTheEvent() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.failure(NOW, TransportError.DNS, 5_000);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.RETRY);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+
+		nextResult = AttemptResult.response(NOW, 200, 20);
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.DELIVERED);
+
+		assertThat(store.attempts).hasSize(2);
+		assertThat(store.attempts.get(0).errorType()).isEqualTo("dns_error");
+		assertThat(store.attempts.get(1).httpStatus()).isEqualTo(200);
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+	}
+
+	@Test
+	void aCompletedEventIsIgnoredWithoutSendingOrRecording() {
+		store.current = delivery(DeliveryStatus.COMPLETED, 1, 1);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.attempts).isEmpty();
+	}
+
+	@Test
+	void aFailedEventIsIgnoredToo() {
+		store.current = delivery(DeliveryStatus.FAILED, 1, 1);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+	}
+
+	@Test
+	void aMessageFromAnEarlierRoundIsIgnored() {
+		store.current = delivery(DeliveryStatus.PENDING, 2, 0);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.attempts).isEmpty();
+	}
+
+	@Test
+	void aMessageForAnUnknownEventIsIgnored() {
+		assertThat(service.deliver(new DispatchMessage("MISSING", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+	}
+
+	@Test
+	void aWorkerThatCannotClaimSendsNothingAndRecordsNothing() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.heldByAnotherWorker = true;
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.attempts).isEmpty();
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.PENDING);
+	}
+
+	@Test
+	void everyWriteCarriesTheGenerationTokenOfTheClaim() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+
+		service.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(store.claims).isEqualTo(1);
+		assertThat(store.writeTokens).containsExactly(1L);
+	}
+
+	@Test
+	void aStaleWorkerWhoseLeaseWasTakenOverIsIgnoredAndDoesNotOverwriteTheNewerResult() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.generation = 7;
+		// While the first worker is sending, its lease is taken over and the newer worker completes the event.
+		WebhookSender slowSender = delivery -> {
+			store.takeOverAndComplete();
+			return AttemptResult.response(NOW, 503, 20);
+		};
+		DeliveryService stale = new DeliveryService(store, slowSender, Clock.fixed(NOW, ZoneOffset.UTC), 5);
+
+		assertThat(stale.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+		assertThat(store.attempts).singleElement().extracting(DeliveryAttempt::httpStatus).isEqualTo(200);
+	}
+
+	@Test
+	void aConsumerThatLosesTheVersionRaceRecordsNothingAndAsksForNoRetry() {
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.rejectNextWrite = true;
+		nextResult = AttemptResult.response(NOW, 503, 20);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.IGNORED);
+
+		assertThat(store.attempts).isEmpty();
+	}
+
+	@Test
+	void anEventWhoseAttemptsAreAlreadyUsedFailsWithoutSendingAgain() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 5);
+
+		assertThat(service.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.FAILED);
+
+		assertThat(sent).isEmpty();
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+	}
+
+	@Test
+	void theDeadLetterHandlerFailsAnOpenEvent() {
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 5);
+
+		service.failExhausted(new DispatchMessage("N1", 1));
+
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.FAILED);
+		assertThat(store.current.deliveryDate()).isEqualTo(NOW);
+	}
+
+	@Test
+	void theDeadLetterHandlerLeavesFinalEventsAndOtherRoundsAlone() {
+		store.current = delivery(DeliveryStatus.COMPLETED, 1, 1);
+		service.failExhausted(new DispatchMessage("N1", 1));
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.COMPLETED);
+
+		store.current = delivery(DeliveryStatus.RETRYING, 2, 1);
+		service.failExhausted(new DispatchMessage("N1", 1));
+		assertThat(store.current.status()).isEqualTo(DeliveryStatus.RETRYING);
+	}
+
+	@Test
+	void theDeadLetterHandlerDoesNotCountAgainAnEventTheLastAttemptAlreadyFailed() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 4);
+		nextResult = AttemptResult.response(NOW, 503, 20);
+		assertThat(observed.deliver(new DispatchMessage("N1", 1))).isEqualTo(DeliveryResult.EXHAUSTED);
+		Delivery failed = store.current;
+
+		observed.failExhausted(new DispatchMessage("N1", 1));
+
+		assertThat(store.current).isEqualTo(failed);
+		assertThat(metrics.finals).hasSize(1);
+		assertThat(store.attempts).hasSize(1);
+	}
+
+	@Test
+	void everyRecordedAttemptIsObservedWithItsOutcomeAndLatency() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		nextResult = AttemptResult.response(NOW, 503, 120);
+
+		observed.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(metrics.attempts).containsExactly(DeliveryOutcome.RETRYABLE + ":120");
+		assertThat(metrics.finals).isEmpty();
+	}
+
+	@Test
+	void theTimeFromCreationToTheFinalOutcomeIsObservedWhenTheEventCompletes() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender,
+				Clock.fixed(NOW.plusSeconds(90), ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+
+		observed.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(metrics.attempts).containsExactly(DeliveryOutcome.SUCCESS + ":20");
+		assertThat(metrics.finals).containsExactly(DeliveryStatus.COMPLETED + ":" + Duration.ofSeconds(90));
+	}
+
+	@Test
+	void exhaustedRetriesObserveAFailedFinalOutcome() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender,
+				Clock.fixed(NOW.plusSeconds(300), ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.RETRYING, 1, 5);
+
+		observed.failExhausted(new DispatchMessage("N1", 1));
+
+		assertThat(metrics.finals).containsExactly(DeliveryStatus.FAILED + ":" + Duration.ofSeconds(300));
+		assertThat(metrics.attempts).isEmpty();
+	}
+
+	@Test
+	void anAttemptLostToAConcurrentConsumerIsNotObserved() {
+		RecordingMetrics metrics = new RecordingMetrics();
+		DeliveryService observed = new DeliveryService(store, sender, Clock.fixed(NOW, ZoneOffset.UTC), 5, metrics);
+		store.current = delivery(DeliveryStatus.PENDING, 1, 0);
+		store.rejectNextWrite = true;
+
+		observed.deliver(new DispatchMessage("N1", 1));
+
+		assertThat(metrics.attempts).isEmpty();
+		assertThat(metrics.finals).isEmpty();
+	}
+
+	@Test
+	void rejectsANonPositiveAttemptBudget() {
+		assertThatIllegalArgumentException().isThrownBy(() -> new DeliveryService(store, sender, Clock.systemUTC(), 0));
+	}
+
+	private static Delivery withNextAttempt(Delivery d, Instant at) {
+		return new Delivery(d.id(), d.eventId(), d.eventType(), d.content(), d.destinationUrl(), d.createdAt(),
+				d.status(), d.round(), d.attemptsInRound(), d.deliveryDate(), d.deliveredAt(), d.lastError(),
+				d.version(), d.subscriptionId(), d.secretCiphertext(), at);
+	}
+
+	private static Delivery withoutNextAttempt(Delivery d) {
+		return withNextAttempt(d, null);
+	}
+
+	private static Delivery delivery(DeliveryStatus status, int round, int attemptsInRound) {
+		return new Delivery(new NotificationEventId("N1"), "E1", "credit_deposit", "content",
+				"https://example.com/hook", NOW, status, round, attemptsInRound, null, null, null, 0);
+	}
+
+	private static final class RecordingMetrics implements DeliveryMetrics {
+
+		private final List<String> attempts = new ArrayList<>();
+
+		private final List<String> finals = new ArrayList<>();
+
+		@Override
+		public void attemptRecorded(DeliveryOutcome outcome, long latencyMs) {
+			attempts.add(outcome + ":" + latencyMs);
+		}
+
+		@Override
+		public void finalOutcome(DeliveryStatus status, Duration sinceCreation) {
+			finals.add(status + ":" + sinceCreation);
+		}
+
+		@Override
+		public void deadLettered() {
+		}
+
+	}
+
+	private static final class FakeStore implements DeliveryStore {
+
+		private Delivery current;
+
+		private final List<DeliveryAttempt> attempts = new ArrayList<>();
+
+		private boolean rejectNextWrite;
+
+		private boolean heldByAnotherWorker;
+
+		private long generation;
+
+		private int claims;
+
+		private Duration delay;
+
+		private final List<Long> writeTokens = new ArrayList<>();
+
+		/** Another worker reclaims the event and records a successful attempt: the token moves on. */
+		void takeOverAndComplete() {
+			generation++;
+			attempts.add(new DeliveryAttempt(1, 1, NOW, 200, null, 5));
+			current = delivery(DeliveryStatus.COMPLETED, 1, 1);
+		}
+
+		@Override
+		public Optional<Lease> claim(Delivery observed, String owner, Instant now, Duration leaseDuration) {
+			if (heldByAnotherWorker) {
+				return Optional.empty();
+			}
+			claims++;
+			return Optional.of(new Lease(owner, ++generation));
+		}
+
+		@Override
+		public Optional<Delivery> find(String notificationEventId) {
+			return current != null && current.id().value().equals(notificationEventId) ? Optional.of(current)
+					: Optional.empty();
+		}
+
+		@Override
+		public boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after) {
+			return recordAttempt(lease, before, attempt, after, null);
+		}
+
+		@Override
+		public boolean recordAttempt(Lease lease, Delivery before, DeliveryAttempt attempt, Delivery after,
+				Duration next) {
+			if (lease.generation() != generation) {
+				return false;
+			}
+			writeTokens.add(lease.generation());
+			if (rejectNextWrite) {
+				rejectNextWrite = false;
+				return false;
+			}
+			attempts.add(attempt);
+			delay = next;
+			// The real store writes now() + delay; any non-null time marks the row as scheduled.
+			current = next == null ? after : withNextAttempt(after, NOW.plus(next));
+			return true;
+		}
+
+		@Override
+		public boolean updateState(Lease lease, Delivery before, Delivery after) {
+			if (lease.generation() != generation) {
+				return false;
+			}
+			writeTokens.add(lease.generation());
+			current = after;
+			return true;
+		}
+
+	}
+
+}

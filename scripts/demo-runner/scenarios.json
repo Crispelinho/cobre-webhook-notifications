@@ -1,0 +1,25 @@
+[
+  {
+    "id": "ok",
+    "description": "Signed delivery to a receiver that answers 200: completed on the first attempt.",
+    "requires_tunnel": true,
+    "receiver_suffix": "/ok",
+    "expect": {"delivery_status": "completed", "attempts": 1, "receiver_status": 200},
+    "timeout_s": 300
+  },
+  {
+    "id": "fail-retries-exhausted",
+    "description": "Receiver answers 500 every time: five attempts, then failed with retries_exhausted.",
+    "requires_tunnel": true,
+    "receiver_suffix": "/fail",
+    "expect": {"delivery_status": "failed", "attempts": 5, "receiver_status": 500},
+    "timeout_s": 3600
+  },
+  {
+    "id": "host-not-allowed",
+    "description": "A host outside the allowlist is refused at registration: 400 with the generic message, no subscription.",
+    "requires_tunnel": false,
+    "registration_url": "https://example.org/cobre",
+    "expect": {"registration_status": 400}
+  }
+]

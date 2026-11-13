@@ -1,0 +1,19 @@
+app:
+  security:
+    jwt:
+      # Created by ./gradlew devToken; must match DevTokenTool.ISSUER.
+      public-key-location: file:.local/dev-jwt/public.pem
+      issuer: cobre-notifications-dev
+  delivery:
+    retry:
+      # Shorter delays so a failed delivery ends in about four minutes. Without them the production schedule needs
+      # about 42 minutes to exhaust five attempts.
+      delays: PT10S,PT30S,PT1M,PT2M
+  seed:
+    enabled: true
+  webhook:
+    # The seed data (seed/notification_events.json) points at webhook.example.com. It is allowed here only: the base
+    # configuration allows no host at all, so production rejects it. WEBHOOK_ALLOWED_HOSTS still overrides this.
+    allowed-hosts: ${WEBHOOK_ALLOWED_HOSTS:webhook.example.com}
+    # Development-only key (the base64 of "local-only-key-not-for-real-use!"); never use it outside the local profile.
+    secrets-key: bG9jYWwtb25seS1rZXktbm90LWZvci1yZWFsLXVzZSE=
